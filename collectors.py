@@ -16,9 +16,10 @@ import threading
 import time
 from typing import Optional, Dict, Any
 
-from models import MetricItem, PageData
+from models import MetricItem, PageData, CryptoAsset, StockQuote, ClaudeAccountProfile
 from providers import get_provider, UsageData
 from subproc import check_output_hidden, run_hidden
+from market_provider import get_market_data_provider
 
 
 # ==============================================================================
@@ -552,9 +553,37 @@ def provider_to_page_data(data: UsageData) -> PageData:
     """Adapts existing UsageData from providers.py to the unified PageData model."""
     p_name = data.provider_name.upper()
 
+    extra_metrics = []
+    c_profiles = None
+
     if data.provider_name.lower() == "claude":
-        badge_color = "gray"
-        badge = "READY"
+        acc_id = getattr(data, "account_identity", None) or "Not Configured"
+        auth_t = getattr(data, "auth_type", None) or "Subscription"
+        plan_t = getattr(data, "plan_tier", None) or "Claude Pro"
+        
+        badge_color = "green" if data.primary_status == "ACTIVE" else ("amber" if data.is_stale else "gray")
+        badge = "ACTIVE" if data.primary_status == "ACTIVE" else ("STALE" if data.is_stale else "READY")
+        
+        extra_metrics = [
+            MetricItem(label="ACCOUNT", value=acc_id, authority=data.authority),
+            MetricItem(label="PLAN", value=plan_t, authority="AUTHORITATIVE"),
+            MetricItem(label="AUTH", value=auth_t, authority="AUTHORITATIVE"),
+        ]
+        
+        # Load user configured profiles safely
+        from config import DashboardConfig
+        import claude_usage
+        cfg = DashboardConfig.load()
+        c_profiles = []
+        for idx, p_cfg in enumerate(cfg.claude_profiles):
+            prof = claude_usage.read_claude_account_profile(
+                config_dir=p_cfg.get("config_dir"),
+                user_label=p_cfg.get("user_label", f"Profile {idx+1}"),
+                profile_id=p_cfg.get("id", f"prof_{idx}"),
+                is_active=(idx == 0)
+            )
+            c_profiles.append(prof)
+
     elif data.provider_name.lower() == "gemini":
         if data.freshness == "LIVE":
             badge_color = "green"
@@ -572,10 +601,8 @@ def provider_to_page_data(data: UsageData) -> PageData:
         badge_color = "gray"
         badge = data.primary_status or "READY"
 
-    # UI defaults to remaining_pct per Milestone 8 Section 3
-    # Codex: remaining = 100 - used_percent
-    # Gemini: remaining = remaining_fraction * 100
-    # Claude: if unavailable -> N/A (never calculate from N/A)
+    # UI defaults to remaining_pct per Milestone 8 Section 3 and Milestone 12 Section 4:
+    # "Use remaining quota semantics everywhere: XX% LEFT. Never default to used."
     p_rem = data.normalized_primary_remaining
     p_used = data.normalized_primary_used
     s_rem = data.normalized_secondary_remaining
@@ -637,27 +664,42 @@ def provider_to_page_data(data: UsageData) -> PageData:
         badge_color=badge_color,
         primary_metric=primary_item,
         secondary_metric=secondary_item,
+        extra_metrics=extra_metrics,
         footer_left=badge,
         footer_right=data.model or p_name,
         source_info=getattr(data, "source_description", ""),
         metrics_provenance=data.metrics_classification,
         quota_debug=quota_debug_info,
+        claude_profiles=c_profiles,
     )
 
 
 # ==============================================================================
-# 5. BTC COLLECTOR (LIVE PRICE + 24H HOURLY SPARKLINE)
+# 5. MULTI-ASSET CRYPTO COLLECTOR (BTC, ETH, SOL, DOGE, PEPE)
 # ==============================================================================
-class BtcCollector:
-    """Collects live BTC market data (price, 24h change, 24h high/low, and 24h hourly sparkline)."""
+CRYPTO_METADATA = {
+    "btc": {"id": "bitcoin", "symbol": "BTC", "name": "Bitcoin", "icon": "₿"},
+    "eth": {"id": "ethereum", "symbol": "ETH", "name": "Ethereum", "icon": "Ξ"},
+    "sol": {"id": "solana", "symbol": "SOL", "name": "Solana", "icon": "◎"},
+    "doge": {"id": "dogecoin", "symbol": "DOGE", "name": "Dogecoin", "icon": "Ð"},
+    "pepe": {"id": "pepe", "symbol": "PEPE", "name": "Pepe", "icon": "🐸"},
+}
 
-    def __init__(self, cache_file: str = ".btc_cache.json"):
+
+class MultiCryptoCollector:
+    """
+    Fetches BTC, ETH, SOL, DOGE, and PEPE in a single unified market-data request.
+    Uses CoinGecko public API with 60s local caching in .crypto_cache.json.
+    """
+    _cache_lock = threading.Lock()
+
+    def __init__(self, cache_file: str = ".crypto_cache.json"):
         self.cache_file = cache_file
 
     def _read_cache(self) -> Optional[Dict[str, Any]]:
         if os.path.exists(self.cache_file):
             try:
-                with open(self.cache_file, "r") as f:
+                with open(self.cache_file, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception:
                 pass
@@ -665,121 +707,241 @@ class BtcCollector:
 
     def _write_cache(self, data: Dict[str, Any]) -> None:
         try:
-            with open(self.cache_file, "w") as f:
+            with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         except Exception:
             pass
 
-    def collect(self) -> PageData:
+    def get_all_assets(self) -> Dict[str, CryptoAsset]:
+        """Fetch all 5 assets in a single API call with caching."""
         cache = self._read_cache()
         now = time.time()
-        # 60s cache TTL ensures dashboard does not hammer public APIs on every cycle
         if cache and (now - cache.get("timestamp", 0) < 60.0):
-            return self._build_page(cache, is_live=True)
+            assets: Dict[str, CryptoAsset] = {}
+            for sym, item in cache.get("assets", {}).items():
+                assets[sym] = CryptoAsset(**item)
+            return assets
 
         import urllib.request
-        live_data = None
+        ids = "bitcoin,ethereum,solana,dogecoin,pepe"
+        url = f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids={ids}&sparkline=true&price_change_percentage=24h"
+
+        fetched_assets: Dict[str, CryptoAsset] = {}
+        ts_str = time.strftime("%Y-%m-%d %H:%M:%S")
+
         try:
-            # 1. Query Kraken Ticker
-            req_t = urllib.request.Request(
-                "https://api.kraken.com/0/public/Ticker?pair=XBTUSD",
-                headers={"User-Agent": "MiniToo-Dashboard/1.0"}
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "MiniToo-Dashboard/2.0"}
             )
-            with urllib.request.urlopen(req_t, timeout=2.5) as resp:
-                t_json = json.loads(resp.read().decode("utf-8"))
-                p_key = list(t_json.get("result", {}).keys())[0]
-                t_res = t_json["result"][p_key]
-                price = float(t_res["c"][0])
-                open_price = float(t_res["o"])
-                high = float(t_res["h"][1])
-                low = float(t_res["l"][1])
-                change_pct = ((price - open_price) / open_price) * 100.0
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                for c in data:
+                    c_id = c.get("id")
+                    for sym, meta in CRYPTO_METADATA.items():
+                        if meta["id"] == c_id:
+                            price = float(c.get("current_price") or 0.0)
+                            change = float(c.get("price_change_percentage_24h") or 0.0)
+                            high = float(c.get("high_24h") or price)
+                            low = float(c.get("low_24h") or price)
+                            # 24H sparkline: last 24 hourly points
+                            raw_pts = c.get("sparkline_in_7d", {}).get("price", [])
+                            sparkline = [float(p) for p in raw_pts[-24:]] if len(raw_pts) >= 24 else [float(p) for p in raw_pts]
+                            
+                            asset = CryptoAsset(
+                                symbol=meta["symbol"],
+                                name=meta["name"],
+                                price=price,
+                                change_24h_pct=change,
+                                high_24h=high,
+                                low_24h=low,
+                                sparkline=sparkline,
+                                source="CoinGecko",
+                                fetched_at=ts_str,
+                                icon_char=meta["icon"],
+                            )
+                            fetched_assets[sym] = asset
+                            break
 
-            # 2. Query 24H Hourly OHLC for sparkline
-            req_o = urllib.request.Request(
-                "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=60",
-                headers={"User-Agent": "MiniToo-Dashboard/1.0"}
-            )
-            with urllib.request.urlopen(req_o, timeout=2.5) as resp:
-                o_json = json.loads(resp.read().decode("utf-8"))
-                p_key_ohlc = [k for k in o_json.get("result", {}).keys() if k != "last"][0]
-                candles = o_json["result"][p_key_ohlc][-24:]
-                closes = [float(c[4]) for c in candles]
-
-            live_data = {
-                "price": price,
-                "change_pct": change_pct,
-                "high": high,
-                "low": low,
-                "closes": closes,
-                "timestamp": now,
-            }
-            self._write_cache(live_data)
-            return self._build_page(live_data, is_live=True)
+            if fetched_assets:
+                cache_payload = {
+                    "timestamp": now,
+                    "assets": {sym: vars(a) for sym, a in fetched_assets.items()}
+                }
+                self._write_cache(cache_payload)
+                return fetched_assets
         except Exception:
-            # Fallback to local cache if network failed
-            if cache and "price" in cache:
-                return self._build_page(cache, is_live=False)
-            # Full offline fallback
+            pass
+
+        # Fallback to cache on error
+        if cache and "assets" in cache:
+            assets = {}
+            for sym, item in cache.get("assets", {}).items():
+                assets[sym] = CryptoAsset(**item)
+            return assets
+
+        return {}
+
+    def collect_overview(self) -> PageData:
+        """Overview page containing all 5 crypto assets for desktop and MiniToo table."""
+        assets_map = self.get_all_assets()
+        assets_list = [assets_map[k] for k in ["btc", "eth", "sol", "doge", "pepe"] if k in assets_map]
+
+        if not assets_list:
             return PageData(
-                page_id="btc",
-                title="BTC",
+                page_id="crypto",
+                title="CRYPTO",
                 badge="OFFLINE",
                 badge_color="red",
                 is_offline=True,
-                offline_msg="BTC DATA OFFLINE",
+                offline_msg="CRYPTO DATA OFFLINE",
                 offline_sub="UNAVAILABLE",
-                source_info="Kraken public API (unreachable)",
+                source_info="CoinGecko API (unreachable)",
             )
 
-    def _build_page(self, data: Dict[str, Any], is_live: bool) -> PageData:
-        price = data["price"]
-        change = data["change_pct"]
-        high = data["high"]
-        low = data["low"]
-        closes = data.get("closes", [])
-
-        chg_sign = "+" if change >= 0 else ""
-        chg_str = f"{chg_sign}{change:.1f}%"
-        badge_color = "green" if change >= 0 else "red"
-
-        # Format high and low (e.g. 85.2K)
-        h_str = f"{high/1000:.1f}K" if high >= 1000 else f"${high:.0f}"
-        l_str = f"{low/1000:.1f}K" if low >= 1000 else f"${low:.0f}"
-
-        if not is_live:
-            elapsed = time.time() - data.get("timestamp", 0)
-            age_str = DgxSparkCollector._format_time_ago(elapsed)
-            return PageData(
-                page_id="btc",
-                title="BTC",
-                badge="OFFLINE",
-                badge_color="red",
-                is_offline=True,
-                offline_msg="BTC DATA OFFLINE",
-                offline_sub=f"LAST: ${price:,.0f} ({age_str})",
-                source_info=f"Kraken cache ({age_str})",
-            )
+        btc = assets_map.get("btc")
+        badge_text = f"{btc.change_24h_pct:+.1f}%" if btc else "5 ASSETS"
+        badge_color = "green" if (btc and btc.change_24h_pct >= 0) else "red"
 
         return PageData(
-            page_id="btc",
-            title="BTC",
+            page_id="crypto",
+            title="CRYPTO",
+            badge=badge_text,
+            badge_color=badge_color,
+            crypto_assets=assets_list,
+            primary_metric=MetricItem(
+                label="BTC",
+                value=btc.formatted_price if btc else "$0",
+                reset=f"{btc.change_24h_pct:+.1f}%" if btc else "",
+                authority="AUTHORITATIVE",
+            ) if btc else None,
+            secondary_metric=MetricItem(
+                label="ETH",
+                value=assets_map["eth"].formatted_price if "eth" in assets_map else "$0",
+                reset=f"{assets_map['eth'].change_24h_pct:+.1f}%" if "eth" in assets_map else "",
+                authority="AUTHORITATIVE",
+            ) if "eth" in assets_map else None,
+            footer_left="5 ASSETS",
+            footer_right="SPOT",
+            source_info="CoinGecko Public API (Single Request)",
+        )
+
+    def collect_asset(self, symbol_key: str) -> PageData:
+        """Card / page for an individual cryptocurrency asset."""
+        key = symbol_key.lower().strip()
+        meta = CRYPTO_METADATA.get(key, {"symbol": key.upper(), "name": key.upper(), "icon": ""})
+        assets_map = self.get_all_assets()
+        asset = assets_map.get(key)
+
+        if not asset:
+            return PageData(
+                page_id=key,
+                title=meta["symbol"],
+                badge="OFFLINE",
+                badge_color="red",
+                is_offline=True,
+                offline_msg=f"{meta['symbol']} OFFLINE",
+                offline_sub="UNAVAILABLE",
+                source_info="CoinGecko API (unreachable)",
+            )
+
+        chg_sign = "+" if asset.change_24h_pct >= 0 else ""
+        chg_str = f"{chg_sign}{asset.change_24h_pct:.1f}%"
+        badge_color = "green" if asset.change_24h_pct >= 0 else "red"
+
+        # Format high and low safely when None
+        high_price = asset.high_24h if asset.high_24h is not None else asset.price
+        low_price = asset.low_24h if asset.low_24h is not None else asset.price
+
+        h_str = f"${high_price:,.0f}" if high_price >= 1000 else (f"${high_price:.2f}" if high_price >= 1.0 else f"${high_price:.6f}")
+        l_str = f"${low_price:,.0f}" if low_price >= 1000 else (f"${low_price:.2f}" if low_price >= 1.0 else f"${low_price:.6f}")
+
+        return PageData(
+            page_id=key,
+            title=f"{meta['icon']} {meta['symbol']}".strip(),
             badge=chg_str,
             badge_color=badge_color,
             primary_metric=MetricItem(
                 label="PRICE",
-                value=f"${price:,.0f}",
+                value=asset.formatted_price,
                 reset=chg_str,
                 authority="AUTHORITATIVE",
             ),
-            sparkline_data=closes,
+            sparkline_data=asset.sparkline,
             sparkline_change=chg_str,
             sparkline_high=h_str,
             sparkline_low=l_str,
-            footer_left="BITCOIN",
+            footer_left=meta["name"].upper(),
             footer_right="SPOT",
-            source_info="https://api.kraken.com/0/public/Ticker + OHLC",
+            source_info=f"CoinGecko API — {asset.name}",
         )
+
+
+class BtcCollector:
+    """Preserves backward compatibility while leveraging MultiCryptoCollector."""
+    def __init__(self, cache_file: str = ".crypto_cache.json"):
+        self._crypto = MultiCryptoCollector(cache_file=cache_file)
+
+    def collect(self) -> PageData:
+        return self._crypto.collect_asset("btc")
+
+
+# ==============================================================================
+# 5B. STOCK VOLATILITY COLLECTOR (TOP 10 MOST VOLATILE US STOCKS)
+# ==============================================================================
+class StockVolatilityCollector:
+    """Collects top 10 most volatile US equities today ranked by objective intraday range percentage."""
+
+    def collect(self) -> PageData:
+        provider = get_market_data_provider()
+        quotes = provider.get_top_volatile_stocks(10)
+
+        if not quotes:
+            return PageData(
+                page_id="stocks_volatile",
+                title="VOLATILE",
+                badge="OFFLINE",
+                badge_color="red",
+                is_offline=True,
+                offline_msg="MARKET DATA OFFLINE",
+                offline_sub="UNAVAILABLE",
+                source_info="YahooFinance / MarketProvider",
+            )
+
+        top_quote = quotes[0]
+        mkt_state = top_quote.market_state.upper()
+        state_badge = "OPEN" if "REGULAR" in mkt_state else ("POST" if "POST" in mkt_state else ("PRE" if "PRE" in mkt_state else "CLOSED"))
+        state_color = "green" if state_badge == "OPEN" else "amber"
+
+        pm = MetricItem(
+            label=f"#1 {top_quote.symbol}",
+            value=f"${top_quote.price:.2f}",
+            reset=f"VOL {top_quote.volatility_pct:.1f}%",
+            authority="AUTHORITATIVE",
+        )
+        sm = None
+        if len(quotes) > 1:
+            q2 = quotes[1]
+            sm = MetricItem(
+                label=f"#2 {q2.symbol}",
+                value=f"${q2.price:.2f}",
+                reset=f"VOL {q2.volatility_pct:.1f}%",
+                authority="AUTHORITATIVE",
+            )
+
+        return PageData(
+            page_id="stocks_volatile",
+            title="VOLATILE",
+            badge=state_badge,
+            badge_color=state_color,
+            primary_metric=pm,
+            secondary_metric=sm,
+            stocks_data=quotes,
+            footer_left=f"TOP 10 US EQUITIES",
+            footer_right=state_badge,
+            source_info=f"{top_quote.source} — (High-Low)/PrevClose",
+        )
+
 
 
 # ==============================================================================

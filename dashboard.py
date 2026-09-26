@@ -25,6 +25,8 @@ from collectors import (
     DgxSparkCollector,
     CodingStatusCollector,
     BtcCollector,
+    MultiCryptoCollector,
+    StockVolatilityCollector,
     AiActivityCollector,
     ServicesCollector,
     provider_to_page_data,
@@ -36,15 +38,21 @@ from inputs import BaseInputAdapter, InputEvent, MiniTooInputAdapter, frame_spp,
 
 
 PAGE_KEYS = [
-    "claude",
+    "btc",
+    "eth",
+    "sol",
+    "doge",
+    "pepe",
+    "crypto",
     "codex",
     "gemini",
+    "claude",
     "local_pc",
     "dgx_spark",
     "coding",
-    "btc",
-    "ai_activity",
     "services",
+    "ai_activity",
+    "stocks_volatile",
 ]
 
 
@@ -60,8 +68,12 @@ def collect_page(page_id: str, repo_path: str = ".", dgx_host: str = "dgx") -> P
         return DgxSparkCollector(host=dgx_host).collect()
     elif norm_id in ("coding", "git", "repo"):
         return CodingStatusCollector(repo_path=repo_path).collect()
-    elif norm_id == "btc":
-        return BtcCollector().collect()
+    elif norm_id == "crypto":
+        return MultiCryptoCollector().collect_overview()
+    elif norm_id in ("btc", "eth", "sol", "doge", "pepe"):
+        return MultiCryptoCollector().collect_asset(norm_id)
+    elif norm_id in ("stocks_volatile", "stocks", "stock"):
+        return StockVolatilityCollector().collect()
     elif norm_id in ("ai_activity", "activity"):
         return AiActivityCollector().collect()
     elif norm_id in ("services", "service"):

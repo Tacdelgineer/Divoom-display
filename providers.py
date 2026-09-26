@@ -53,6 +53,9 @@ class UsageData:
     fetched_at: Optional[str] = None
     authority: str = "AUTHORITATIVE"
     age_seconds: Optional[float] = None
+    account_identity: Optional[str] = None
+    auth_type: Optional[str] = None
+    profile: Optional[Any] = None
 
 
 class BaseProvider:
@@ -71,20 +74,28 @@ class ClaudeProvider(BaseProvider):
 
         model = raw.get("model_name", "OPUS 5")
         fetched_at_str = raw.get("fetched_at")
-        freshness = raw.get("freshness_str", "No cache")
+        freshness = raw.get("authority", "No cache")
+        masked_account = raw.get("masked_account", "Not Configured")
+        plan_tier = raw.get("plan_tier", "Claude Pro")
+        auth_type = raw.get("auth_type", "Subscription (OAuth)")
+        profile = raw.get("account_profile")
 
-        # Per Milestone 5 Section B:
-        # Print mode does not expose /usage, and ~/.claude.json cache is >8 days old.
-        # Do NOT infer subscription quota from tokens, do NOT use old cached 38% as current.
-        # Display N/A honestly.
-        is_live = False
-        is_stale = True
+        is_live = bool(raw.get("is_live", False))
+        is_stale = bool(raw.get("is_stale", True))
+
+        fh_used = raw.get("five_hour_used_pct")
+        fh_rem = raw.get("five_hour_remaining_pct")
+        fh_reset = raw.get("five_hour_reset_str", "N/A")
+
+        wk_used = raw.get("week_used_pct")
+        wk_rem = raw.get("week_remaining_pct")
+        wk_reset = raw.get("week_reset_str", "N/A")
 
         classification = {
-            "primary_pct": "unavailable",
-            "primary_reset": "unavailable",
-            "secondary_pct": "unavailable",
-            "secondary_reset": "unavailable",
+            "primary_pct": "stale_cache" if is_stale and fh_rem is not None else ("authoritative" if is_live else "unavailable"),
+            "primary_reset": "stale_cache" if is_stale and fh_reset != "N/A" else ("authoritative" if is_live else "unavailable"),
+            "secondary_pct": "stale_cache" if is_stale and wk_rem is not None else ("authoritative" if is_live else "unavailable"),
+            "secondary_reset": "stale_cache" if is_stale and wk_reset != "N/A" else ("authoritative" if is_live else "unavailable"),
             "model": "authoritative",
         }
 
@@ -97,32 +108,38 @@ class ClaudeProvider(BaseProvider):
             except Exception:
                 pass
 
+        p_val = f"{int(fh_rem)}% LEFT (cached)" if fh_rem is not None else "N/A"
+        s_val = f"{int(wk_rem)}% LEFT (cached)" if wk_rem is not None else "N/A"
+
         return UsageData(
             provider_name="CLAUDE",
             primary_label="5H",
-            primary_pct=None,    # Explicit None -> renders N/A
-            primary_reset="N/A",
-            primary_status="READY",
+            primary_pct=int(fh_used) if fh_used is not None else None,
+            primary_reset=fh_reset,
+            primary_status="ACTIVE" if is_live else ("STALE" if is_stale else "READY"),
             secondary_label="WEEK",
-            secondary_pct=None,  # Explicit None -> renders N/A
-            secondary_reset="N/A",
+            secondary_pct=int(wk_used) if wk_used is not None else None,
+            secondary_reset=wk_reset,
             model=model,
-            plan_tier="PRO",
+            plan_tier=plan_tier,
             is_stale=is_stale,
             freshness=freshness,
             metrics_classification=classification,
-            source_description=f"~/.claude.json ({freshness}; print mode /usage unavailable)",
-            raw_primary_value="N/A",
-            raw_primary_semantic="USED",
-            normalized_primary_used=None,
-            normalized_primary_remaining=None,
-            raw_secondary_value=f"N/A (cached 38% expired {freshness})",
-            raw_secondary_semantic="USED",
-            normalized_secondary_used=None,
-            normalized_secondary_remaining=None,
+            source_description=f"~/.claude.json ({freshness})",
+            raw_primary_value=p_val,
+            raw_primary_semantic="REMAINING",
+            normalized_primary_used=int(fh_used) if fh_used is not None else None,
+            normalized_primary_remaining=int(fh_rem) if fh_rem is not None else None,
+            raw_secondary_value=s_val,
+            raw_secondary_semantic="REMAINING",
+            normalized_secondary_used=int(wk_used) if wk_used is not None else None,
+            normalized_secondary_remaining=int(wk_rem) if wk_rem is not None else None,
             fetched_at=fetched_at_str,
-            authority="UNAVAILABLE",
+            authority=raw.get("authority", "UNAVAILABLE"),
             age_seconds=age_sec,
+            account_identity=masked_account,
+            auth_type=auth_type,
+            profile=profile,
         )
 
 

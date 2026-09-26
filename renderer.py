@@ -143,9 +143,12 @@ def render_dashboard_page(
     elif p_id == "coding":
         c_title = (185, 135, 255)     # Studio purple
         c_badge_border = (70, 45, 110)
-    elif p_id == "btc":
-        c_title = (247, 147, 26)      # Bitcoin gold
+    elif p_id in ("btc", "eth", "sol", "doge", "pepe", "crypto"):
+        c_title = (247, 147, 26)      # Bitcoin / Crypto gold
         c_badge_border = (120, 75, 15)
+    elif p_id in ("stocks_volatile", "stocks"):
+        c_title = (0, 229, 255)       # Cyan stocks scanner
+        c_badge_border = (0, 90, 110)
     elif p_id == "ai_activity":
         c_title = (185, 140, 255)     # Agent purple
         c_badge_border = (70, 45, 110)
@@ -172,8 +175,8 @@ def render_dashboard_page(
         b_text = (page.footer_left or "ONLINE").upper()
     elif p_id == "coding":
         b_text = (page.secondary_metric.value if page.secondary_metric else "MAIN").upper()
-    elif p_id == "btc":
-        b_text = (page.badge or "BTC").upper()
+    elif p_id in ("btc", "eth", "sol", "doge", "pepe", "crypto", "stocks_volatile", "stocks"):
+        b_text = (page.badge or "").upper()
     elif p_id in ("ai_activity", "services"):
         b_text = page.badge.upper()
     else:
@@ -315,11 +318,12 @@ def render_dashboard_page(
         mem_up_str = sm.reset if (sm and sm.reset) else "UPTIME N/A"
         draw.text((8, 89), mem_up_str, fill=(100, 125, 155), font=fonts["reset"])
 
-    # PATH E: BTC PAGE (PRICE + 24H HIGH-CONTRAST SPARKLINE)
-    elif p_id == "btc":
+    # PATH E: INDIVIDUAL CRYPTO ASSET (PRICE + 24H HIGH-CONTRAST SPARKLINE)
+    elif p_id in ("btc", "eth", "sol", "doge", "pepe"):
         pm = page.primary_metric
         price_str = pm.value if pm else "$0"
-        draw.text((8, 25), price_str, fill=(245, 250, 255), font=fonts["large"])
+        price_font = fonts["large"] if len(price_str) <= 8 else fonts["value"]
+        draw.text((8, 25), price_str, fill=(245, 250, 255), font=price_font)
 
         # Sparkline area (x: 8..120, y: 46..84)
         closes = page.sparkline_data or []
@@ -355,7 +359,45 @@ def render_dashboard_page(
         # 24H High & Low
         h_val = page.sparkline_high or "N/A"
         l_val = page.sparkline_low or "N/A"
-        draw.text((8, 91), f"24H H {h_val}   L {l_val}", fill=(130, 150, 175), font=fonts["reset"])
+        draw.text((8, 91), f"24H H {h_val}  L {l_val}", fill=(130, 150, 175), font=fonts["reset"])
+
+    # PATH E2: CRYPTO OVERVIEW TABLE (5 ASSETS ON 128px DISPLAY)
+    elif p_id == "crypto":
+        assets = page.crypto_assets or []
+        for idx, a in enumerate(assets[:5]):
+            ry = 26 + idx * 15
+            # Symbol
+            draw.text((8, ry), a.symbol, fill=(245, 250, 255), font=fonts["label"])
+            # Compact Price
+            p_str = a.formatted_compact_price
+            draw.text((44, ry), p_str, fill=(200, 215, 230), font=fonts["label"])
+            # 24H Change
+            chg_c = (50, 230, 140) if a.change_24h_pct >= 0 else (245, 80, 80)
+            chg_str = f"{a.change_24h_pct:+.1f}%"
+            cbox = fonts["label"].getbbox(chg_str)
+            cw = cbox[2] - cbox[0]
+            draw.text((120 - cw, ry), chg_str, fill=chg_c, font=fonts["label"])
+            if idx < 4:
+                draw.line([(8, ry + 14), (120, ry + 14)], fill=(18, 26, 40), width=1)
+
+    # PATH E3: VOLATILE STOCKS SCANNER (TOP 5 ON 128px DISPLAY)
+    elif p_id in ("stocks_volatile", "stocks"):
+        quotes = page.stocks_data or []
+        for idx, q in enumerate(quotes[:5]):
+            ry = 26 + idx * 15
+            rank_str = f"{idx+1}"
+            draw.text((8, ry), rank_str, fill=(100, 120, 145), font=fonts["reset"])
+            draw.text((18, ry), q.symbol, fill=(245, 250, 255), font=fonts["label"])
+            
+            p_str = f"${q.price:.1f}" if q.price < 1000 else f"${q.price:.0f}"
+            draw.text((54, ry), p_str, fill=(190, 205, 220), font=fonts["reset"])
+            
+            vol_str = f"{q.volatility_pct:.1f}%"
+            vbox = fonts["label"].getbbox(vol_str)
+            vw = vbox[2] - vbox[0]
+            draw.text((120 - vw, ry), vol_str, fill=(0, 229, 255), font=fonts["label"])
+            if idx < 4:
+                draw.line([(8, ry + 14), (120, ry + 14)], fill=(18, 26, 40), width=1)
 
     # PATH F: AI ACTIVITY PAGE (CODEX, CLAUDE, GEMINI REAL-TIME STATUS)
     elif p_id == "ai_activity":

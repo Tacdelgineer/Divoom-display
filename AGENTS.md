@@ -8,8 +8,8 @@
 ## 1. Project Purpose & Scope
 
 **AI Desk Dashboard** is a retro-styled dual-mode telemetry dashboard for developers:
-1. **Desktop Companion App**: A native Python Tkinter 628×512 GUI displaying 9 telemetry cards in a 3×3 grid.
-2. **Physical Desk Display Controller**: Drives an external **Divoom MiniToo** 160×128 color IPS LCD over Bluetooth SPP in Custom Channel 5 with physical knob rotation control.
+1. **Desktop Companion App**: A native Python Tkinter GUI with configurable sections (`CRYPTO`, `AI USAGE`, `SYSTEM`, `STOCKS`), presets (`ALL`, `AI`, `MARKETS`, `SYSTEM`), and full card/section ordering.
+2. **Physical Desk Display Controller**: Drives an external **Divoom MiniToo** 160×128 color IPS LCD over Bluetooth SPP in Custom Channel 5 with physical knob rotation control, multi-crypto views, and stock volatility rankings.
 
 ---
 
@@ -18,9 +18,12 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                       DATA COLLECTORS                       │
-│  collectors.py · providers.py · subproc.py                  │
+│  collectors.py · providers.py · market_provider.py          │
 │  - Non-blocking (strict timeouts <= 3.0s)                  │
-│  - Zero Windows console flashing (CREATE_NO_WINDOW)         │
+│  - Zero Windows console flashing (subproc.py)              │
+│  - Multi-asset crypto (BTC, ETH, SOL, DOGE, PEPE via 1 req) │
+│  - US Stock volatility scanner (intraday high-low range)    │
+│  - Safe Claude diagnostics (masked email, env precedence)   │
 └──────────────────────────────┬──────────────────────────────┘
                                │ Returns PageData models
                                ▼
@@ -36,7 +39,8 @@
 ┌──────────────────────────────┐ ┌────────────────────────────┐
 │       DESKTOP RENDERER       │ │      MINITOO RENDERER      │
 │  dashboard_app.py            │ │  renderer.py (Pillow)      │
-│  - Native Tkinter canvas     │ │  - 160x128 24-bit RGB JPEG │
+│  - Section-based Canvas      │ │  - 160x128 24-bit RGB JPEG │
+│  - Preset switching          │ │  - Multi-asset table / 128p│
 │  - Interactive card clicks   │ │  - Frame buffer payload    │
 └──────────────┬───────────────┘ └─────────────┬──────────────┘
                │                               │
@@ -56,16 +60,18 @@
 
 | File | Purpose | Critical Rules |
 | :--- | :--- | :--- |
-| `dashboard_app.py` | Main Desktop Companion application | Pure Tkinter; no web views; handles window events & settings |
+| `dashboard_app.py` | Main Desktop Companion application | Pure Tkinter; section layout; presets; canvas scroll support |
 | `engine.py` | Background scheduler & MiniToo controller | Thread-safe state container; auto-reconnects on device loss |
-| `collectors.py` | Data collectors (GPU, DGX, BTC, Git, Services) | Independent timeouts; never let one collector block others |
-| `providers.py` | AI Quota providers (Codex, Gemini, Claude) | Preserves authority levels; calculates remaining percentage |
-| `models.py` | Unified data structures (`PageData`, `MetricItem`) | Dataclasses for consistent UI rendering across backends |
-| `renderer.py` | Pixel-perfect 160×128 image generator | Pillow graphics; 8×10 tile alignment; retro terminal palette |
+| `market_provider.py` | Stock quote & volatility provider abstraction | Pluggable interface; YahooFinance (free) & Finnhub; cached |
+| `collectors.py` | Data collectors (GPU, DGX, Multi-Crypto, Stocks, Git) | Consolidated requests; 60s caches; never block the UI thread |
+| `claude_usage.py` | Claude account diagnostics & profile reader | Safe masking (`no***@gmail.com`); env precedence; no token scraping |
+| `providers.py` | AI Quota providers (Codex, Gemini, Claude) | Preserves authority levels; strictly calculates % LEFT |
+| `models.py` | Unified data structures (`PageData`, `CryptoAsset`, `StockQuote`) | Clean dataclasses; formatting helpers for micro-tokens |
+| `renderer.py` | Pixel-perfect 160×128 image generator | Pillow graphics; 8×10 tile alignment; multi-asset tables |
 | `detector.py` | Bluetooth SPP hardware discovery | Scores COM ports; safely probes `0xBD 0x13`; never hardcodes |
 | `inputs.py` | Physical rotary knob & button listener | Polls volume delta `0x09`; restores base volume; debounces |
 | `backends.py` | MiniToo frame transmission transport | Multi-packet SPP streaming `0x8B`; ACK timeout handling |
-| `config.py` | Persistent user configuration | Stored in `%APPDATA%\AiDeskDashboard\config.json`; no tokens |
+| `config.py` | Persistent user configuration & section definitions | Stored in `%APPDATA%\AiDeskDashboard\config.json`; no secrets |
 | `subproc.py` | Silent subprocess execution helper | Always use `run_hidden()` / `check_output_hidden()` on Windows |
 
 ---
@@ -96,7 +102,7 @@ python dashboard_app.py
 python dashboard.py --status
 
 # Run single page collection test
-python -c "from dashboard import collect_page; print(collect_page('codex'))"
+python -c "from dashboard import collect_page; print(collect_page('crypto'))"
 
 # Verify MiniToo COM port detection
 python -c "from detector import detect_minitoo_port; print(detect_minitoo_port())"
@@ -117,22 +123,25 @@ pyinstaller "AI Desk Dashboard.spec"
    - Every metric must declare an authority level: `AUTHORITATIVE`, `CALCULATED`, `STALE_CACHE`, or `UNAVAILABLE`.
    - Never turn unavailable values into `0` or `0%`. If a metric is missing, report `N/A` with authority `UNAVAILABLE`.
 3. **Quota Semantics (% LEFT)**:
-   - UI metrics for AI quotas always display **Remaining** (`% LEFT`), not used.
+   - UI metrics for AI quotas always display **Remaining** (`% LEFT`), never used.
    - For Codex: `remaining = 100 - used_percent`.
    - For Gemini: `remaining = remaining_fraction * 100`.
-   - For Claude: `N/A` (never calculate or guess a percentage).
-4. **DO NOT Hardcode COM Ports**:
-   - Always route hardware connections through `detector.detect_minitoo_port()` or user-specified config.
-   - Never default or fall back to `"COM7"`.
+   - For Claude: Displays cached remaining or `N/A` (never fabricate).
+4. **DO NOT Log or Expose Secrets or Identifiers**:
+   - Never log or store raw API keys, OAuth tokens, or unmasked email addresses.
+   - User account emails must always be masked (e.g. `no***@gmail.com`).
 5. **No Visible Child Console Flashing on Windows**:
    - Always route child processes (`nvidia-smi`, `git`, `ssh`, `agy`) through `subproc.py`.
    - Injects `CREATE_NO_WINDOW = 0x08000000`, `SW_HIDE`, and `shell=False`.
 6. **Zero-Dependency Desktop Mode**:
    - The application must operate 100% reliably when MiniToo hardware is disconnected, turned off, or absent.
 7. **Independent Failure Safety**:
-   - Collectors must be wrapped in try/except blocks. A timeout in the DGX collector or a failure in Gemini collection must never crash the engine or prevent other widgets from rendering.
-8. **Keep Dependencies Minimal**:
-   - Use standard library wherever possible. External runtime dependencies are limited to: `pillow`, `pyserial`, `requests`, and `psutil`. Do not introduce heavyweight frameworks (no Electron, no web servers, no Qt).
+   - Collectors must be wrapped in try/except blocks. A timeout in the DGX collector or a rate limit on CoinGecko must never crash the engine or prevent other widgets from rendering.
+8. **Defensible Volatility Metric**:
+   - Volatility is calculated as `(high - low) / previous_close * 100`. Never substitute daily percentage gainers for volatility.
+9. **Safe Claude Multi-Account Handling**:
+   - Claude Code CLI does not support simultaneous multi-account switching within a single profile folder.
+   - Support multiple accounts *only* via isolated configuration directories (`CLAUDE_CONFIG_DIR`). Never scrape tokens, steal browser cookies, or hijack existing sessions.
 
 ---
 

@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 """
-Claude Code local usage reader.
+Claude Code local usage reader & account diagnostics.
 Reads ~/.claude.json for authoritative Anthropic usage cache,
+reads ~/.claude/.credentials.json for active authentication context,
 and reads ~/.claude/projects/*/*.jsonl for local session details and model history.
+
+Milestone 12 enhancements:
+- Inspects active account identity (anonymized/masked email).
+- Identifies plan tier and authentication type (Subscription vs API Key).
+- Probes environment variables (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, etc.) for precedence.
+- Supports isolated local ClaudeAccountProfile instances for multi-account environments.
+- Enforces strict 'XX% LEFT' remaining quota semantics.
 """
 from __future__ import annotations
 
@@ -10,17 +18,76 @@ import datetime
 import glob
 import json
 import os
-from typing import Any
+from typing import Any, Dict, Optional, List
+
+from models import ClaudeAccountProfile
+
+
+def mask_account_identifier(ident: str | None) -> str:
+    """Anonymize email or account UUID to protect user privacy (e.g. 'no***@gmail.com')."""
+    if not ident:
+        return "UNKNOWN"
+    s = ident.strip()
+    if "@" in s:
+        user, domain = s.split("@", 1)
+        prefix = user[:2] if len(user) >= 2 else user[:1]
+        return f"{prefix}***@{domain}"
+    elif len(s) > 8:
+        return f"{s[:4]}...{s[-4:]}"
+    return f"{s[:2]}***"
+
+
+def get_claude_env_diagnostics() -> Dict[str, Any]:
+    """
+    Inspect whether environment variables are overriding Claude Code authentication.
+    Reports presence and precedence without disclosing sensitive token values.
+    """
+    env_keys = [
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+    ]
+    diag = {}
+    for k in env_keys:
+        diag[k] = "PRESENT" if k in os.environ and bool(os.environ[k].strip()) else "ABSENT"
+
+    # Precedence analysis
+    has_api_key = diag["ANTHROPIC_API_KEY"] == "PRESENT"
+    has_oauth_token = diag["CLAUDE_CODE_OAUTH_TOKEN"] == "PRESENT"
+    has_cloud = any(diag[c] == "PRESENT" for c in ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"])
+
+    if has_api_key:
+        active_auth = "API Key (Overridden via ANTHROPIC_API_KEY)"
+        precedence = "ENV_VAR_OVERRIDE"
+    elif has_oauth_token:
+        active_auth = "OAuth Token (Overridden via CLAUDE_CODE_OAUTH_TOKEN)"
+        precedence = "ENV_VAR_OVERRIDE"
+    elif has_cloud:
+        active_auth = "Cloud Bedrock/Vertex/Foundry"
+        precedence = "ENV_VAR_OVERRIDE"
+    else:
+        active_auth = "Subscription (OAuth from local ~/.claude/.credentials.json)"
+        precedence = "LOCAL_SUBSCRIPTION_ACTIVE"
+
+    return {
+        "variables": diag,
+        "active_auth_type": active_auth,
+        "precedence": precedence,
+    }
+
 
 def parse_iso(ts_str: str | None) -> datetime.datetime | None:
     if not ts_str:
         return None
     try:
-        # Handle trailing Z or timezone offsets
         ts_str = ts_str.replace("Z", "+00:00")
         return datetime.datetime.fromisoformat(ts_str)
     except Exception:
         return None
+
 
 def format_timedelta(delta: datetime.timedelta) -> str:
     if delta.total_seconds() <= 0:
@@ -35,203 +102,226 @@ def format_timedelta(delta: datetime.timedelta) -> str:
     else:
         return f"{minutes}M"
 
-def read_claude_usage(user_home: str | None = None) -> dict[str, Any]:
+
+def read_claude_account_profile(
+    config_dir: Optional[str] = None,
+    user_label: str = "Personal",
+    profile_id: str = "personal",
+    is_active: bool = True,
+) -> ClaudeAccountProfile:
     """
-    Read Claude Code usage data from local files.
-    Returns a structured dictionary with values and authoritative vs estimated flags.
+    Read an isolated Claude Code configuration directory into a ClaudeAccountProfile.
+    Does not copy secrets or modify another session.
     """
-    home = user_home or os.path.expanduser("~")
-    claude_json_path = os.path.join(home, ".claude.json")
-    projects_dir = os.path.join(home, ".claude", "projects")
+    home = os.path.expanduser("~")
+    dir_path = config_dir or os.path.join(home, ".claude")
+
+    # Locate .claude.json: either in directory itself or parent user directory
+    claude_json_candidates = [
+        os.path.join(dir_path, ".claude.json"),
+        os.path.join(os.path.dirname(dir_path), ".claude.json") if dir_path.endswith((".claude", ".claude-secondary")) else os.path.join(home, ".claude.json"),
+    ]
+    claude_json_path = None
+    for c in claude_json_candidates:
+        if os.path.exists(c):
+            claude_json_path = c
+            break
+
+    credentials_path = os.path.join(dir_path, ".credentials.json")
+
+    masked_email = "Not Configured"
+    plan_tier = "Pro"
+    auth_type = "Subscription"
+    status_text = "READY"
+    usage_available = False
+    authority = "UNAVAILABLE"
+
+    # 1. Inspect credentials if present
+    if os.path.exists(credentials_path):
+        try:
+            with open(credentials_path, "r", encoding="utf-8") as f:
+                cred = json.load(f)
+                oauth = cred.get("claudeAiOauth", {})
+                if oauth:
+                    stype = oauth.get("subscriptionType", "pro").upper()
+                    plan_tier = f"Claude {stype.capitalize()}"
+                    auth_type = "Subscription (OAuth)"
+                    status_text = "AUTHENTICATED"
+        except Exception:
+            pass
+
+    # 2. Inspect ~/.claude.json for account identity and usage cache
+    five_hour_used: Optional[float] = None
+    five_hour_rem: Optional[float] = None
+    five_hour_reset_str: Optional[str] = None
+    week_used: Optional[float] = None
+    week_rem: Optional[float] = None
+    week_reset_str: Optional[str] = None
+    fetched_at_str: Optional[str] = None
 
     now_utc = datetime.datetime.now(datetime.timezone.utc)
 
-    # 1. Read .claude.json
-    cached_util = None
-    fetched_at = None
-    if os.path.exists(claude_json_path):
+    if claude_json_path and os.path.exists(claude_json_path):
         try:
             with open(claude_json_path, "r", encoding="utf-8", errors="ignore") as f:
-                config_data = json.load(f)
-                cached_util = config_data.get("cachedUsageUtilization")
-                if cached_util and "fetchedAtMs" in cached_util:
-                    fetched_at = datetime.datetime.fromtimestamp(
-                        cached_util["fetchedAtMs"] / 1000, tz=datetime.timezone.utc
-                    )
-        except Exception as e:
-            print(f"Warning reading {claude_json_path}: {e}")
+                cdata = json.load(f)
+                oauth_acc = cdata.get("oauthAccount", {})
+                raw_email = oauth_acc.get("emailAddress")
+                if raw_email:
+                    masked_email = mask_account_identifier(raw_email)
+                    status_text = "ACTIVE" if is_active else "CONFIGURED"
 
-    # 2. Read session logs for latest model and active window
+                org_type = oauth_acc.get("organizationType", "claude_pro")
+                if "pro" in org_type.lower():
+                    plan_tier = "Claude Pro"
+                elif "team" in org_type.lower():
+                    plan_tier = "Claude Team"
+                elif "enterprise" in org_type.lower():
+                    plan_tier = "Claude Enterprise"
+
+                cached_util = cdata.get("cachedUsageUtilization", {})
+                if cached_util:
+                    fms = cached_util.get("fetchedAtMs")
+                    if fms:
+                        fdt = datetime.datetime.fromtimestamp(fms / 1000, tz=datetime.timezone.utc)
+                        fetched_at_str = fdt.isoformat()
+                        age_days = (now_utc - fdt).total_seconds() / 86400.0
+                        if age_days < 1.0:
+                            usage_available = True
+                            authority = "AUTHORITATIVE"
+                        else:
+                            usage_available = False
+                            authority = "STALE_CACHE"
+
+                    u = cached_util.get("utilization", {})
+                    fh = u.get("five_hour") or {}
+                    if fh.get("utilization") is not None:
+                        five_hour_used = float(fh["utilization"])
+                        five_hour_rem = max(0.0, 100.0 - five_hour_used)
+                        fh_res = parse_iso(fh.get("resets_at"))
+                        if fh_res:
+                            five_hour_reset_str = format_timedelta(fh_res - now_utc)
+
+                    sd = u.get("seven_day") or {}
+                    if sd.get("utilization") is not None:
+                        week_used = float(sd["utilization"])
+                        week_rem = max(0.0, 100.0 - week_used)
+                        sd_res = parse_iso(sd.get("resets_at"))
+                        if sd_res:
+                            week_reset_str = format_timedelta(sd_res - now_utc)
+        except Exception:
+            pass
+
+    # If directory doesn't exist, report pending setup
+    if not os.path.exists(dir_path) and profile_id != "personal":
+        status_text = "NOT_CONFIGURED"
+        masked_email = "None (Setup Pending)"
+
+    return ClaudeAccountProfile(
+        id=profile_id,
+        user_label=user_label,
+        account_identity_masked=masked_email,
+        plan=plan_tier,
+        auth_type=auth_type,
+        status_text=status_text,
+        five_hour_used_pct=five_hour_used,
+        five_hour_remaining_pct=five_hour_rem,
+        five_hour_reset=five_hour_reset_str,
+        weekly_used_pct=week_used,
+        weekly_remaining_pct=week_rem,
+        weekly_reset=week_reset_str,
+        authority=authority,
+        usage_available=usage_available,
+        is_active=is_active,
+        fetched_at=fetched_at_str,
+        config_dir=dir_path,
+    )
+
+
+def read_claude_usage(user_home: str | None = None) -> dict[str, Any]:
+    """
+    Read Claude Code usage and active account profile.
+    Returns structured dictionary with strict remaining_pct quota semantics.
+    """
+    home = user_home or os.path.expanduser("~")
+    projects_dir = os.path.join(home, ".claude", "projects")
+
+    # Read active account profile
+    active_profile = read_claude_account_profile(
+        config_dir=os.path.join(home, ".claude"),
+        user_label="Personal",
+        profile_id="personal",
+        is_active=True,
+    )
+
+    env_diag = get_claude_env_diagnostics()
+
+    # Model and session log reading
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
     latest_msg_time = None
     latest_model = "Sonnet"
-    active_window_start = None
-    recent_tokens = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
-
     jsonl_files = glob.glob(os.path.join(projects_dir, "*", "*.jsonl"))
     for file_path in jsonl_files:
         try:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
-                    if '"model":' not in line and '"usage":' not in line:
+                    if '"model":' not in line:
                         continue
                     try:
                         record = json.loads(line)
                         msg = record.get("message")
-                        if not isinstance(msg, dict):
-                            continue
-                        model = msg.get("model")
-                        ts_str = record.get("timestamp")
-                        ts = parse_iso(ts_str)
-                        if ts:
-                            if latest_msg_time is None or ts > latest_msg_time:
+                        if isinstance(msg, dict):
+                            model = msg.get("model")
+                            ts = parse_iso(record.get("timestamp"))
+                            if ts and (latest_msg_time is None or ts > latest_msg_time):
                                 latest_msg_time = ts
                                 if model:
                                     latest_model = model
-
-                            # Check if within last 5 hours
-                            if (now_utc - ts).total_seconds() <= 5 * 3600:
-                                if active_window_start is None or ts < active_window_start:
-                                    active_window_start = ts
-                                usage = msg.get("usage", {})
-                                recent_tokens["input"] += usage.get("input_tokens", 0)
-                                recent_tokens["output"] += usage.get("output_tokens", 0)
-                                recent_tokens["cache_read"] += usage.get("cache_read_input_tokens", 0)
-                                recent_tokens["cache_write"] += usage.get("cache_creation_input_tokens", 0)
                     except Exception:
-                        continue
+                        pass
         except Exception:
-            continue
+            pass
 
-    # Format model name nicely for 128x128 header
     clean_model = "CLAUDE"
     if "opus" in latest_model.lower():
-        if "5" in latest_model:
-            clean_model = "OPUS 5"
-        elif "4" in latest_model:
-            clean_model = "OPUS 4"
-        else:
-            clean_model = "OPUS"
+        clean_model = "OPUS 5" if "5" in latest_model else "OPUS"
     elif "sonnet" in latest_model.lower():
-        if "4-5" in latest_model or "4.5" in latest_model:
-            clean_model = "SONNET 4.5"
-        else:
-            clean_model = "SONNET"
+        clean_model = "SONNET 4.5" if "4-5" in latest_model or "4.5" in latest_model else "SONNET"
     elif "haiku" in latest_model.lower():
         clean_model = "HAIKU"
-    elif "fable" in latest_model.lower():
-        clean_model = "FABLE"
-
-    # Default metrics
-    five_hour_pct: int | None = None
-    five_hour_reset_str = "N/A"
-    week_pct: int | None = None
-    week_reset_str = "N/A"
-    is_live = False
-    is_stale = False
-    freshness_str = "No cache"
-
-    documentation = {
-        "five_hour_percent": "Unavailable - no active server window or fresh cache",
-        "five_hour_reset": "Unavailable",
-        "week_percent": "Unavailable",
-        "week_reset": "Unavailable",
-        "model": "Authoritative from local session logs",
-    }
-
-    if fetched_at:
-        age_hours = (now_utc - fetched_at).total_seconds() / 3600.0
-        age_days = age_hours / 24.0
-        if age_days >= 1.0:
-            freshness_str = f"{age_days:.1f}d ago ({fetched_at.strftime('%Y-%m-%d %H:%M UTC')})"
-            is_stale = True
-        else:
-            freshness_str = f"{age_hours:.1f}h ago ({fetched_at.strftime('%H:%M UTC')})"
-
-    if cached_util and "utilization" in cached_util:
-        u = cached_util["utilization"]
-        fh = u.get("five_hour") or {}
-        sd = u.get("seven_day") or {}
-
-        # 7-day weekly usage percentage
-        sd_reset = parse_iso(sd.get("resets_at"))
-        raw_sd_util = sd.get("utilization")
-        if raw_sd_util is not None:
-            # If the weekly cycle reset occurred before now, cache is for previous period
-            if sd_reset and sd_reset < now_utc:
-                is_stale = True
-                week_pct = int(round(raw_sd_util))
-                documentation["week_percent"] = f"Stale cached snapshot ({freshness_str}) - weekly cycle expired {sd_reset.strftime('%Y-%m-%d')}"
-            else:
-                week_pct = int(round(raw_sd_util))
-                documentation["week_percent"] = f"Authoritative Anthropic utilization percentage ({freshness_str})"
-
-        # 7-day weekly reset
-        if sd_reset:
-            next_reset = sd_reset
-            while next_reset < now_utc:
-                next_reset += datetime.timedelta(days=7)
-            week_reset_str = format_timedelta(next_reset - now_utc)
-            documentation["week_reset"] = f"Calculated next cycle ({next_reset.strftime('%a %H:%M UTC')}) from Anthropic weekly schedule"
-
-        # 5-hour usage
-        fh_reset = parse_iso(fh.get("resets_at"))
-        raw_fh_util = fh.get("utilization")
-
-        if fh_reset and fh_reset > now_utc:
-            # Currently active 5h window recorded in server cache
-            five_hour_pct = int(round(raw_fh_util)) if raw_fh_util is not None else None
-            five_hour_reset_str = format_timedelta(fh_reset - now_utc)
-            is_live = True
-            documentation["five_hour_percent"] = f"Authoritative Anthropic utilization ({freshness_str})"
-            documentation["five_hour_reset"] = f"Authoritative Anthropic reset timestamp ({fh_reset.strftime('%H:%M UTC')})"
-        elif active_window_start:
-            window_end = active_window_start + datetime.timedelta(hours=5)
-            if window_end > now_utc:
-                five_hour_reset_str = format_timedelta(window_end - now_utc)
-                # If cached utilization was fetched during this same active window
-                if fetched_at and fetched_at >= active_window_start and raw_fh_util is not None:
-                    five_hour_pct = int(round(raw_fh_util))
-                    documentation["five_hour_percent"] = f"Authoritative Anthropic utilization ({freshness_str})"
-                else:
-                    # Active session exists locally, but server percentage is unknown without fresh cache
-                    five_hour_pct = None
-                    documentation["five_hour_percent"] = "Unavailable - active local session but server quota cache is stale"
-                documentation["five_hour_reset"] = "Calculated from local session message timestamps (+5H)"
-                is_live = True
-            else:
-                five_hour_pct = None
-                five_hour_reset_str = "N/A"
-                documentation["five_hour_percent"] = f"Unavailable - window expired ({freshness_str})"
-                documentation["five_hour_reset"] = "N/A"
-        else:
-            # No active window and cached 5h window is expired
-            five_hour_pct = None
-            five_hour_reset_str = "N/A"
-            documentation["five_hour_percent"] = f"Unavailable - cache expired ({freshness_str})"
-            documentation["five_hour_reset"] = "N/A"
 
     return {
-        "five_hour_pct": five_hour_pct,
-        "five_hour_reset_str": five_hour_reset_str,
-        "week_pct": week_pct,
-        "week_reset_str": week_reset_str,
+        "account_profile": active_profile,
+        "env_diagnostics": env_diag,
+        "masked_account": active_profile.account_identity_masked,
+        "plan_tier": active_profile.plan,
+        "auth_type": active_profile.auth_type,
+        "five_hour_used_pct": active_profile.five_hour_used_pct,
+        "five_hour_remaining_pct": active_profile.five_hour_remaining_pct,
+        "five_hour_reset_str": active_profile.five_hour_reset or "N/A",
+        "week_used_pct": active_profile.weekly_used_pct,
+        "week_remaining_pct": active_profile.weekly_remaining_pct,
+        "week_reset_str": active_profile.weekly_reset or "N/A",
         "model_name": clean_model,
         "raw_model": latest_model,
-        "is_live": is_live,
-        "is_stale": is_stale,
-        "freshness_str": freshness_str,
-        "fetched_at": fetched_at.isoformat() if fetched_at else None,
-        "recent_tokens": recent_tokens,
-        "documentation": documentation,
+        "is_live": active_profile.usage_available,
+        "is_stale": active_profile.authority == "STALE_CACHE",
+        "authority": active_profile.authority,
+        "fetched_at": active_profile.fetched_at,
     }
+
 
 if __name__ == "__main__":
     data = read_claude_usage()
-    print("=== Claude Usage Summary ===")
-    print(f"Model: {data['model_name']} ({data['raw_model']})")
-    print(f"5-Hour: {data['five_hour_pct']}% | Reset: {data['five_hour_reset_str']}")
-    print(f"Week:   {data['week_pct']}% | Reset: {data['week_reset_str']}")
-    print(f"Live Active: {data['is_live']}")
-    print("\n=== Authority / Estimation Breakdown ===")
-    for k, v in data["documentation"].items():
-        print(f"  • {k}: {v}")
+    print("=== Active Claude Account & Usage ===")
+    print(f"Account: {data['masked_account']}")
+    print(f"Plan:    {data['plan_tier']}")
+    print(f"Auth:    {data['auth_type']}")
+    print(f"Model:   {data['model_name']}")
+    print(f"5-Hour:  {data['five_hour_remaining_pct']}% LEFT (Used: {data['five_hour_used_pct']}%)")
+    print(f"Weekly:  {data['week_remaining_pct']}% LEFT (Used: {data['week_used_pct']}%)")
+    print(f"Authority: {data['authority']}")
+    print("\n=== Environment Diagnostics ===")
+    for k, v in data["env_diagnostics"]["variables"].items():
+        print(f"  {k:<28}: {v}")
+    print(f"Precedence: {data['env_diagnostics']['precedence']}")

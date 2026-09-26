@@ -2,8 +2,9 @@
 """
 UI Components for AI Desk Dashboard:
 1. FirstRunDialog - Initial setup & system service detection screen.
-2. SettingsDialog - Lightweight modal for page ordering, port selection,
-   rotation interval, auto-cycle, DGX host, and system startup.
+2. ClaudeAccountsDialog - Multi-account inspector & diagnostic modal.
+3. SettingsDialog - Lightweight modal for section ordering, card ordering,
+   presets, Claude profiles, port selection, rotation interval, and auto-cycle.
 Styled strictly in the dark retro/pixel dashboard aesthetic.
 """
 from __future__ import annotations
@@ -16,9 +17,22 @@ import tkinter as tk
 from tkinter import font as tkfont
 from typing import Callable, Optional, Dict, List, Any
 
-from config import DashboardConfig, ALL_PAGE_IDS, PAGE_LABELS
+from config import (
+    DashboardConfig,
+    ALL_PAGE_IDS,
+    PAGE_LABELS,
+    ALL_SECTIONS,
+    SECTION_TITLES,
+    DEFAULT_SECTION_CARDS,
+    ALL_PRESETS,
+    PRESET_ALL,
+    PRESET_AI,
+    PRESET_MARKETS,
+    PRESET_SYSTEM,
+)
 from detector import detect_minitoo_port, get_all_com_ports
 from subproc import check_output_hidden, run_hidden
+import claude_usage
 
 # Design System
 C_BG = "#0A0E17"
@@ -52,24 +66,22 @@ class FirstRunDialog(tk.Toplevel):
         self.on_open_dashboard = on_open_dashboard
 
         self.title("AI Desk Dashboard — System Setup")
-        self.geometry("440x480")
+        self.geometry("440x510")
         self.resizable(False, False)
         self.configure(bg=C_BG)
         self.transient(parent)
         self.grab_set()
 
-        # Center over parent
         self.update_idletasks()
         px = parent.winfo_x() + (parent.winfo_width() - 440) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - 480) // 2
-        self.geometry(f"+{max(40, px)}+{max(40, py)}")
+        py = parent.winfo_y() + (parent.winfo_height() - 510) // 2
+        self.geometry(f"+{max(40, px)}+{max(30, py)}")
 
         self.status_labels: Dict[str, tk.Label] = {}
         self._build_ui()
         self._run_probes()
 
     def _build_ui(self):
-        # Header
         h_frame = tk.Frame(self, bg=C_BG)
         h_frame.pack(fill="x", padx=20, pady=(20, 10))
 
@@ -89,7 +101,6 @@ class FirstRunDialog(tk.Toplevel):
             bg=C_BG,
         ).pack(anchor="w", pady=(2, 0))
 
-        # Status Table Container
         tbl = tk.Frame(self, bg=C_PANEL_BG, highlightbackground=C_BORDER, highlightthickness=1)
         tbl.pack(fill="both", expand=True, padx=20, pady=10)
 
@@ -100,12 +111,13 @@ class FirstRunDialog(tk.Toplevel):
             ("claude", "Claude"),
             ("gpu", "Local GPU"),
             ("dgx", "DGX Spark"),
-            ("btc", "BTC"),
+            ("crypto", "Crypto Markets"),
+            ("stocks", "Stocks Scanner"),
         ]
 
         for idx, (key, title) in enumerate(rows):
             rf = tk.Frame(tbl, bg=C_PANEL_BG)
-            rf.pack(fill="x", padx=16, pady=8)
+            rf.pack(fill="x", padx=16, pady=7)
 
             tk.Label(
                 rf,
@@ -113,7 +125,7 @@ class FirstRunDialog(tk.Toplevel):
                 font=("Consolas", 10, "bold"),
                 fg=C_TEXT_WHITE,
                 bg=C_PANEL_BG,
-                width=14,
+                width=16,
                 anchor="w",
             ).pack(side="left")
 
@@ -131,87 +143,94 @@ class FirstRunDialog(tk.Toplevel):
             if idx < len(rows) - 1:
                 tk.Frame(tbl, bg=C_BORDER, height=1).pack(fill="x", padx=12)
 
-        # Bottom Action Bar
         btn_frame = tk.Frame(self, bg=C_BG)
         btn_frame.pack(fill="x", padx=20, pady=(10, 20))
 
         self.btn_open = tk.Button(
             btn_frame,
             text="[ OPEN DASHBOARD ]",
-            font=("Consolas", 11, "bold"),
-            bg="#0E2419",
-            fg=C_GREEN,
-            activebackground=C_GREEN,
-            activeforeground="#000000",
-            highlightbackground="#1E4733",
+            font=("Consolas", 10, "bold"),
+            bg="#102538",
+            fg=C_CYAN,
+            activebackground="#173550",
+            activeforeground=C_CYAN,
             bd=1,
             relief="solid",
             cursor="hand2",
+            padx=16,
             pady=8,
-            command=self._on_confirm,
+            command=self._finish,
         )
         self.btn_open.pack(fill="x")
 
+    def _update_status(self, key: str, text: str, color: str):
+        if key in self.status_labels:
+            self.status_labels[key].config(text=text, fg=color)
+
     def _run_probes(self):
-        """Run non-blocking background probes for all services."""
         def probe_worker():
-            # 1. MiniToo
-            mt = detect_minitoo_port(self.config.minitoo_port)
-            mt_text = f"CONNECTED ({mt})" if mt else "NOT FOUND"
-            mt_color = C_GREEN if mt else C_AMBER
-            self._update_status("minitoo", mt_text, mt_color)
+            # 1. MiniToo Port
+            port = detect_minitoo_port(self.config.minitoo_port)
+            if port:
+                self._update_status("minitoo", f"FOUND ({port})", C_GREEN)
+            else:
+                self._update_status("minitoo", "NOT DETECTED", C_AMBER)
 
             # 2. Codex
-            cx = shutil.which("codex") is not None or os.path.exists(os.path.expanduser("~/.codex"))
-            self._update_status("codex", "READY" if cx else "NOT FOUND", C_GREEN if cx else C_TEXT_DIM)
+            home = os.path.expanduser("~")
+            codex_auth = os.path.join(home, ".codex", "auth.json")
+            if os.path.exists(codex_auth):
+                self._update_status("codex", "READY", C_GREEN)
+            else:
+                self._update_status("codex", "NOT CONFIGURED", C_TEXT_DIM)
 
-            # 3. Gemini
-            gm = shutil.which("agy") is not None or shutil.which("gemini") is not None
-            self._update_status("gemini", "READY" if gm else "NOT FOUND", C_GREEN if gm else C_TEXT_DIM)
+            # 3. Gemini / Antigravity
+            agy_bin = shutil.which("agy") or os.path.exists(os.path.join(home, "AppData", "Local", "agy", "bin", "agy.exe"))
+            if agy_bin:
+                self._update_status("gemini", "READY", C_GREEN)
+            else:
+                self._update_status("gemini", "LOCAL ONLY", C_AMBER)
 
             # 4. Claude
-            self._update_status("claude", "READY / QUOTA N/A", C_CORAL)
+            claude_data = claude_usage.read_claude_usage()
+            if claude_data.get("masked_account") and claude_data["masked_account"] != "Not Configured":
+                self._update_status("claude", f"READY ({claude_data['masked_account']})", C_CORAL)
+            else:
+                self._update_status("claude", "NOT CONFIGURED", C_TEXT_DIM)
 
             # 5. Local GPU
-            gpu_str = "N/A"
-            try:
-                smi = check_output_hidden(
-                    ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                    text=True,
-                    timeout=2.0
-                ).strip()
-                if smi:
-                    gpu_str = smi.splitlines()[0][:20]
-            except Exception:
-                gpu_str = "ACTIVE / N/A"
-            self._update_status("gpu", gpu_str, C_CYAN)
+            if shutil.which("nvidia-smi"):
+                try:
+                    out = check_output_hidden(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], text=True, timeout=2.0).strip()
+                    gname = out.split("\n")[0].strip()
+                    for pfx in ("NVIDIA GeForce ", "NVIDIA ", "GeForce "):
+                        if gname.startswith(pfx):
+                            gname = gname[len(pfx):]
+                    self._update_status("gpu", f"ONLINE ({gname[:12]})", C_GREEN)
+                except Exception:
+                    self._update_status("gpu", "ERROR", C_AMBER)
+            else:
+                self._update_status("gpu", "NO NVIDIA GPU", C_TEXT_DIM)
 
-            # 6. DGX Spark
-            dgx_on = False
+            # 6. DGX Spark Host
             try:
-                res = run_hidden(
-                    ["ssh", "-o", "ConnectTimeout=1", "-o", "BatchMode=yes", self.config.dgx_host, "echo 1"],
-                    capture_output=True,
-                    timeout=1.5
-                )
-                dgx_on = (res.returncode == 0)
+                out = check_output_hidden(["ssh", "-o", "ConnectTimeout=2", "-o", "BatchMode=yes", self.config.dgx_host, "hostname"], text=True, timeout=2.5).strip()
+                if out:
+                    self._update_status("dgx", "ONLINE", C_GREEN)
+                else:
+                    self._update_status("dgx", "OFFLINE (CACHED)", C_AMBER)
             except Exception:
-                pass
-            self._update_status("dgx", "ONLINE" if dgx_on else "OFFLINE", C_GREEN if dgx_on else C_AMBER)
+                self._update_status("dgx", "OFFLINE (CACHED)", C_AMBER)
 
-            # 7. BTC
-            self._update_status("btc", "READY", C_GOLD)
+            # 7. Crypto
+            self._update_status("crypto", "5 ASSETS LIVE", C_GOLD)
+
+            # 8. Stocks
+            self._update_status("stocks", "VOLATILITY READY", C_CYAN)
 
         threading.Thread(target=probe_worker, daemon=True).start()
 
-    def _update_status(self, key: str, text: str, color: str):
-        def apply():
-            lbl = self.status_labels.get(key)
-            if lbl and lbl.winfo_exists():
-                lbl.config(text=text, fg=color)
-        self.after(0, apply)
-
-    def _on_confirm(self):
+    def _finish(self):
         self.config.first_run_completed = True
         self.config.save()
         self.destroy()
@@ -220,83 +239,60 @@ class FirstRunDialog(tk.Toplevel):
 
 
 # ==============================================================================
-# 2. COMPACT RETRO SETTINGS DIALOG
+# 2. CLAUDE MULTI-ACCOUNT DIAGNOSTICS MODAL
 # ==============================================================================
-class SettingsDialog(tk.Toplevel):
+class ClaudeAccountsDialog(tk.Toplevel):
     """
-    Compact settings window allowing user to:
-    - Enable/disable pages with checkboxes
-    - Reorder pages using Up / Down buttons
-    - Select MiniToo port (Auto-detect or COM ports)
-    - Configure rotation interval & toggle auto-cycle
-    - Toggle Start with Windows and Launch Minimized
-    - Configure DGX host and coding repo path
+    Diagnostics and account management modal for Claude Code profiles.
+    Exposes active account, authentication type, plan, environment variables,
+    and instructions for configuring isolated secondary profiles safely.
     """
 
-    def __init__(self, parent: tk.Tk, config: DashboardConfig, on_save_callback: Callable[[DashboardConfig], None]):
+    def __init__(self, parent: tk.Tk, config: DashboardConfig):
         super().__init__(parent)
-        self.parent = parent
         self.config = config
-        self.on_save_callback = on_save_callback
 
-        self.title("AI Desk Dashboard — Settings")
-        self.geometry("490x600")
+        self.title("Claude Account Diagnostics & Profiles")
+        self.geometry("520x560")
         self.resizable(False, False)
         self.configure(bg=C_BG)
         self.transient(parent)
         self.grab_set()
 
-        # Center over parent
         self.update_idletasks()
-        px = parent.winfo_x() + (parent.winfo_width() - 490) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - 600) // 2
+        px = parent.winfo_x() + (parent.winfo_width() - 520) // 2
+        py = parent.winfo_y() + (parent.winfo_height() - 560) // 2
         self.geometry(f"+{max(40, px)}+{max(30, py)}")
 
-        # Working state copies
-        self.working_page_order = list(self.config.page_order)
-        self.working_enabled: Dict[str, tk.BooleanVar] = {}
-        for p in ALL_PAGE_IDS:
-            self.working_enabled[p] = tk.BooleanVar(value=(p in self.config.enabled_pages))
-
-        self.selected_page_idx: Optional[int] = None
         self._build_ui()
 
     def _build_ui(self):
-        # Header
         h_frame = tk.Frame(self, bg=C_BG)
         h_frame.pack(fill="x", padx=16, pady=(16, 8))
 
         tk.Label(
             h_frame,
-            text="DASHBOARD SETTINGS",
+            text="CLAUDE ACCOUNT DIAGNOSTICS",
             font=("Consolas", 12, "bold"),
-            fg=C_CYAN,
+            fg=C_CORAL,
             bg=C_BG,
-        ).pack(side="left")
+        ).pack(anchor="w")
 
-        btn_status = tk.Button(
+        tk.Label(
             h_frame,
-            text="[ SYSTEM HEALTH ]",
-            font=("Consolas", 8, "bold"),
-            bg="#141E2F",
-            fg=C_CYAN,
-            bd=1,
-            relief="solid",
-            cursor="hand2",
-            command=self._show_system_health,
-        )
-        btn_status.pack(side="right")
+            text="AUTH ISOLATION & ENVIRONMENT VARIABLE PRECEDENCE",
+            font=("Consolas", 8),
+            fg=C_TEXT_DIM,
+            bg=C_BG,
+        ).pack(anchor="w", pady=(2, 0))
 
-        # Scrollable / sectioned content
         container = tk.Frame(self, bg=C_BG)
         container.pack(fill="both", expand=True, padx=16)
 
-        # ----------------------------------------------------------------------
-        # SECTION 1: PAGES & REORDERING
-        # ----------------------------------------------------------------------
+        # 1. Active Account Box
         sec1 = tk.LabelFrame(
             container,
-            text=" PAGES & DISPLAY ORDER ",
+            text=" ACTIVE CLAUDE PROFILE ",
             font=("Consolas", 8, "bold"),
             fg=C_TEXT_MUTED,
             bg=C_PANEL_BG,
@@ -308,75 +304,279 @@ class SettingsDialog(tk.Toplevel):
         )
         sec1.pack(fill="x", pady=6)
 
-        p_row = tk.Frame(sec1, bg=C_PANEL_BG)
-        p_row.pack(fill="x")
+        raw = claude_usage.read_claude_usage()
+        prof = raw.get("account_profile")
 
-        # Page Listbox container
-        self.listbox = tk.Listbox(
-            p_row,
-            font=("Consolas", 9),
+        fields = [
+            ("ACCOUNT:", raw.get("masked_account", "Not Configured"), C_TEXT_WHITE),
+            ("PLAN:", raw.get("plan_tier", "Claude Pro"), C_CORAL),
+            ("AUTH TYPE:", raw.get("auth_type", "Subscription (OAuth)"), C_CYAN),
+            ("5H QUOTA:", f"{raw.get('five_hour_remaining_pct')}% LEFT" if raw.get('five_hour_remaining_pct') is not None else "N/A", C_GREEN),
+            ("WEEK QUOTA:", f"{raw.get('week_remaining_pct')}% LEFT" if raw.get('week_remaining_pct') is not None else "N/A", C_GREEN),
+            ("AUTHORITY:", raw.get("authority", "UNAVAILABLE"), C_AMBER if raw.get("is_stale") else C_GREEN),
+        ]
+
+        for label, val, color in fields:
+            row = tk.Frame(sec1, bg=C_PANEL_BG)
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=label, font=("Consolas", 8, "bold"), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=12, anchor="w").pack(side="left")
+            tk.Label(row, text=val, font=("Consolas", 8, "bold"), fg=color, bg=C_PANEL_BG, anchor="w").pack(side="left")
+
+        # 2. Environment Variables & Precedence
+        sec2 = tk.LabelFrame(
+            container,
+            text=" ENVIRONMENT VARIABLES & OVERRIDES ",
+            font=("Consolas", 8, "bold"),
+            fg=C_TEXT_MUTED,
+            bg=C_PANEL_BG,
+            highlightbackground=C_BORDER,
+            highlightthickness=1,
+            bd=0,
+            padx=10,
+            pady=6,
+        )
+        sec2.pack(fill="x", pady=6)
+
+        diag = raw.get("env_diagnostics", {})
+        vars_map = diag.get("variables", {})
+
+        for var_name, state in vars_map.items():
+            row = tk.Frame(sec2, bg=C_PANEL_BG)
+            row.pack(fill="x", pady=1)
+            tk.Label(row, text=var_name, font=("Consolas", 7), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=28, anchor="w").pack(side="left")
+            color = C_AMBER if state == "PRESENT" else C_TEXT_DIM
+            tk.Label(row, text=state, font=("Consolas", 7, "bold"), fg=color, bg=C_PANEL_BG, anchor="e").pack(side="right")
+
+        prec_row = tk.Frame(sec2, bg=C_PANEL_BG)
+        prec_row.pack(fill="x", pady=(4, 0))
+        tk.Label(prec_row, text="PRECEDENCE:", font=("Consolas", 7, "bold"), fg=C_CYAN, bg=C_PANEL_BG, width=14, anchor="w").pack(side="left")
+        tk.Label(prec_row, text=diag.get("precedence", "LOCAL_SUBSCRIPTION"), font=("Consolas", 7), fg=C_TEXT_WHITE, bg=C_PANEL_BG).pack(side="left")
+
+        # 3. Multi-Account Isolation Instructions
+        sec3 = tk.LabelFrame(
+            container,
+            text=" SECONDARY ACCOUNT SETUP ",
+            font=("Consolas", 8, "bold"),
+            fg=C_TEXT_MUTED,
+            bg=C_PANEL_BG,
+            highlightbackground=C_BORDER,
+            highlightthickness=1,
+            bd=0,
+            padx=10,
+            pady=6,
+        )
+        sec3.pack(fill="x", pady=6)
+
+        desc = (
+            "To add an isolated second account without modifying your primary session:\n"
+            "1. Run in PowerShell:\n"
+            '   $env:CLAUDE_CONFIG_DIR="$HOME\\.claude-secondary"\n'
+            "   claude auth login\n"
+            "2. AI Desk Dashboard will automatically read the secondary profile."
+        )
+        tk.Label(
+            sec3,
+            text=desc,
+            font=("Consolas", 7),
+            fg=C_TEXT_WHITE,
+            bg=C_PANEL_BG,
+            justify="left",
+            anchor="w",
+        ).pack(fill="x")
+
+        # Close button
+        tk.Button(
+            self,
+            text="[ CLOSE ]",
+            font=("Consolas", 9, "bold"),
+            bg="#161F2E",
+            fg=C_TEXT_WHITE,
+            bd=1,
+            relief="solid",
+            cursor="hand2",
+            pady=6,
+            command=self.destroy,
+        ).pack(fill="x", padx=16, pady=(6, 16))
+
+
+# ==============================================================================
+# 3. COMPREHENSIVE SETTINGS DIALOG (SECTIONS, CARDS, PRESETS, ROTATION)
+# ==============================================================================
+class SettingsDialog(tk.Toplevel):
+    """
+    Settings modal for:
+    - Preset selection: ALL, AI, MARKETS, SYSTEM
+    - Section order & visibility toggles
+    - Card order & visibility toggles per section
+    - Claude account diagnostics & profile setup
+    - MiniToo COM port & rotation settings
+    - Autostart with Windows
+    """
+
+    def __init__(self, parent: tk.Tk, config: DashboardConfig, on_save_callback: Optional[Callable[[DashboardConfig], None]] = None):
+        super().__init__(parent)
+        self.config = config
+        self.on_save_callback = on_save_callback
+
+        self.title("AI Desk Dashboard — Configuration")
+        self.geometry("540x660")
+        self.resizable(False, False)
+        self.configure(bg=C_BG)
+        self.transient(parent)
+        self.grab_set()
+
+        self.update_idletasks()
+        px = parent.winfo_x() + (parent.winfo_width() - 540) // 2
+        py = parent.winfo_y() + (parent.winfo_height() - 660) // 2
+        self.geometry(f"+{max(40, px)}+{max(30, py)}")
+
+        # Working state copies
+        self.working_sections_order = list(self.config.sections_order)
+        self.working_enabled_sections: Dict[str, tk.BooleanVar] = {
+            s: tk.BooleanVar(value=self.config.enabled_sections.get(s, True)) for s in ALL_SECTIONS
+        }
+        self.working_section_cards: Dict[str, List[str]] = {
+            s: list(self.config.section_cards.get(s, DEFAULT_SECTION_CARDS[s])) for s in ALL_SECTIONS
+        }
+        self.working_enabled_cards: Dict[str, tk.BooleanVar] = {
+            c: tk.BooleanVar(value=self.config.enabled_cards.get(c, True)) for c in ALL_PAGE_IDS
+        }
+
+        self.selected_section = self.working_sections_order[0]
+        self._build_ui()
+
+    def _build_ui(self):
+        # Header
+        h_frame = tk.Frame(self, bg=C_BG)
+        h_frame.pack(fill="x", padx=16, pady=(14, 6))
+
+        tk.Label(
+            h_frame,
+            text="DASHBOARD CONFIGURATION",
+            font=("Consolas", 12, "bold"),
+            fg=C_CYAN,
+            bg=C_BG,
+        ).pack(side="left")
+
+        btn_diag = tk.Button(
+            h_frame,
+            text="[ CLAUDE DIAGNOSTICS ]",
+            font=("Consolas", 8, "bold"),
+            bg="#2A1A14",
+            fg=C_CORAL,
+            bd=1,
+            relief="solid",
+            cursor="hand2",
+            command=self._show_claude_diagnostics,
+        )
+        btn_diag.pack(side="right")
+
+        container = tk.Frame(self, bg=C_BG)
+        container.pack(fill="both", expand=True, padx=16)
+
+        # ----------------------------------------------------------------------
+        # PRESETS BAR
+        # ----------------------------------------------------------------------
+        p_frame = tk.Frame(container, bg=C_BG)
+        p_frame.pack(fill="x", pady=(2, 6))
+
+        tk.Label(p_frame, text="PRESET:", font=("Consolas", 8, "bold"), fg=C_TEXT_MUTED, bg=C_BG).pack(side="left", padx=(0, 6))
+
+        for p_name in ALL_PRESETS:
+            is_active = (self.config.active_preset == p_name)
+            fg_c = C_CYAN if is_active else C_TEXT_WHITE
+            bg_c = "#102538" if is_active else "#131B2A"
+            btn = tk.Button(
+                p_frame,
+                text=f"[ {p_name} ]",
+                font=("Consolas", 8, "bold"),
+                bg=bg_c,
+                fg=fg_c,
+                bd=1,
+                relief="solid",
+                cursor="hand2",
+                command=lambda name=p_name: self._apply_preset_ui(name),
+            )
+            btn.pack(side="left", padx=3)
+
+        # ----------------------------------------------------------------------
+        # SECTIONS & CARDS MANAGER
+        # ----------------------------------------------------------------------
+        sec1 = tk.LabelFrame(
+            container,
+            text=" SECTIONS & CARDS ",
+            font=("Consolas", 8, "bold"),
+            fg=C_TEXT_MUTED,
+            bg=C_PANEL_BG,
+            highlightbackground=C_BORDER,
+            highlightthickness=1,
+            bd=0,
+            padx=10,
+            pady=6,
+        )
+        sec1.pack(fill="x", pady=4)
+
+        sc_grid = tk.Frame(sec1, bg=C_PANEL_BG)
+        sc_grid.pack(fill="x")
+
+        # Left Column: Sections
+        sec_col = tk.Frame(sc_grid, bg=C_PANEL_BG)
+        sec_col.pack(side="left", fill="both", expand=True, padx=(0, 6))
+
+        tk.Label(sec_col, text="SECTIONS ORDER", font=("Consolas", 7, "bold"), fg=C_TEXT_DIM, bg=C_PANEL_BG).pack(anchor="w")
+
+        self.sec_listbox = tk.Listbox(
+            sec_col,
+            font=("Consolas", 8),
             bg="#0D121D",
             fg=C_TEXT_WHITE,
             selectbackground=C_CYAN,
             selectforeground="#000000",
             highlightthickness=1,
             highlightbackground=C_BORDER,
-            height=6,
+            height=5,
             activestyle="none",
         )
-        self.listbox.pack(side="left", fill="both", expand=True)
-        self.listbox.bind("<<ListboxSelect>>", self._on_list_select)
+        self.sec_listbox.pack(fill="x", pady=2)
+        self.sec_listbox.bind("<<ListboxSelect>>", self._on_section_selected)
 
-        # Up / Down Reorder Buttons
-        reorder_btn_box = tk.Frame(p_row, bg=C_PANEL_BG)
-        reorder_btn_box.pack(side="right", padx=(8, 0))
+        sec_btns = tk.Frame(sec_col, bg=C_PANEL_BG)
+        sec_btns.pack(fill="x", pady=2)
+        tk.Button(sec_btns, text="▲", font=("Consolas", 7, "bold"), bg="#161F2E", fg=C_TEXT_WHITE, bd=1, relief="solid", width=3, command=self._move_sec_up).pack(side="left", padx=1)
+        tk.Button(sec_btns, text="▼", font=("Consolas", 7, "bold"), bg="#161F2E", fg=C_TEXT_WHITE, bd=1, relief="solid", width=3, command=self._move_sec_down).pack(side="left", padx=1)
+        tk.Button(sec_btns, text="TOGGLE", font=("Consolas", 7, "bold"), bg="#161F2E", fg=C_AMBER, bd=1, relief="solid", command=self._toggle_sec).pack(side="left", padx=2)
 
-        btn_up = tk.Button(
-            reorder_btn_box,
-            text="▲ UP",
-            font=("Consolas", 8, "bold"),
-            bg="#161F2E",
+        # Right Column: Cards in Selected Section
+        card_col = tk.Frame(sc_grid, bg=C_PANEL_BG)
+        card_col.pack(side="right", fill="both", expand=True, padx=(6, 0))
+
+        self.lbl_cards_header = tk.Label(card_col, text="CARDS IN SECTION", font=("Consolas", 7, "bold"), fg=C_TEXT_DIM, bg=C_PANEL_BG)
+        self.lbl_cards_header.pack(anchor="w")
+
+        self.card_listbox = tk.Listbox(
+            card_col,
+            font=("Consolas", 8),
+            bg="#0D121D",
             fg=C_TEXT_WHITE,
-            bd=1,
-            relief="solid",
-            width=8,
-            cursor="hand2",
-            command=self._move_up,
+            selectbackground=C_GOLD,
+            selectforeground="#000000",
+            highlightthickness=1,
+            highlightbackground=C_BORDER,
+            height=5,
+            activestyle="none",
         )
-        btn_up.pack(pady=3)
+        self.card_listbox.pack(fill="x", pady=2)
 
-        btn_down = tk.Button(
-            reorder_btn_box,
-            text="▼ DOWN",
-            font=("Consolas", 8, "bold"),
-            bg="#161F2E",
-            fg=C_TEXT_WHITE,
-            bd=1,
-            relief="solid",
-            width=8,
-            cursor="hand2",
-            command=self._move_down,
-        )
-        btn_down.pack(pady=3)
+        card_btns = tk.Frame(card_col, bg=C_PANEL_BG)
+        card_btns.pack(fill="x", pady=2)
+        tk.Button(card_btns, text="▲", font=("Consolas", 7, "bold"), bg="#161F2E", fg=C_TEXT_WHITE, bd=1, relief="solid", width=3, command=self._move_card_up).pack(side="left", padx=1)
+        tk.Button(card_btns, text="▼", font=("Consolas", 7, "bold"), bg="#161F2E", fg=C_TEXT_WHITE, bd=1, relief="solid", width=3, command=self._move_card_down).pack(side="left", padx=1)
+        tk.Button(card_btns, text="TOGGLE", font=("Consolas", 7, "bold"), bg="#161F2E", fg=C_AMBER, bd=1, relief="solid", command=self._toggle_card).pack(side="left", padx=2)
 
-        btn_toggle = tk.Button(
-            reorder_btn_box,
-            text="TOGGLE",
-            font=("Consolas", 8, "bold"),
-            bg="#161F2E",
-            fg=C_AMBER,
-            bd=1,
-            relief="solid",
-            width=8,
-            cursor="hand2",
-            command=self._toggle_selected,
-        )
-        btn_toggle.pack(pady=3)
-
-        self._refresh_page_listbox()
+        self._refresh_sections_listbox()
 
         # ----------------------------------------------------------------------
-        # SECTION 2: DEVICE & ROTATION
+        # MINITOO DEVICE & ROTATION
         # ----------------------------------------------------------------------
         sec2 = tk.LabelFrame(
             container,
@@ -390,14 +590,12 @@ class SettingsDialog(tk.Toplevel):
             padx=10,
             pady=6,
         )
-        sec2.pack(fill="x", pady=6)
+        sec2.pack(fill="x", pady=4)
 
         d_row1 = tk.Frame(sec2, bg=C_PANEL_BG)
         d_row1.pack(fill="x", pady=2)
 
         tk.Label(d_row1, text="PORT:", font=("Consolas", 8, "bold"), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=10, anchor="w").pack(side="left")
-
-        # Discover ports for dropdown
         available_ports = ["AUTO"] + [p["device"] for p in get_all_com_ports()]
         if self.config.minitoo_port not in available_ports:
             available_ports.append(self.config.minitoo_port)
@@ -409,20 +607,18 @@ class SettingsDialog(tk.Toplevel):
         om_port.pack(side="left", padx=4)
 
         d_row2 = tk.Frame(sec2, bg=C_PANEL_BG)
-        d_row2.pack(fill="x", pady=4)
+        d_row2.pack(fill="x", pady=2)
 
         tk.Label(d_row2, text="ROTATION:", font=("Consolas", 8, "bold"), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=10, anchor="w").pack(side="left")
-
         self.var_rotation = tk.StringVar(value=str(int(self.config.rotation_interval)))
-        ent_rot = tk.Entry(d_row2, textvariable=self.var_rotation, width=6, font=("Consolas", 9), bg="#0D121D", fg=C_TEXT_WHITE, insertbackground=C_CYAN)
+        ent_rot = tk.Entry(d_row2, textvariable=self.var_rotation, width=5, font=("Consolas", 8), bg="#0D121D", fg=C_TEXT_WHITE, insertbackground=C_CYAN)
         ent_rot.pack(side="left", padx=4)
-
-        tk.Label(d_row2, text="SEC", font=("Consolas", 8), fg=C_TEXT_DIM, bg=C_PANEL_BG).pack(side="left", padx=2)
+        tk.Label(d_row2, text="SEC", font=("Consolas", 7), fg=C_TEXT_DIM, bg=C_PANEL_BG).pack(side="left")
 
         self.var_autocycle = tk.BooleanVar(value=self.config.auto_cycle)
         cb_auto = tk.Checkbutton(
             d_row2,
-            text="AUTO CYCLE PAGES",
+            text="AUTO CYCLE",
             variable=self.var_autocycle,
             font=("Consolas", 8, "bold"),
             fg=C_GREEN,
@@ -434,11 +630,11 @@ class SettingsDialog(tk.Toplevel):
         cb_auto.pack(side="right")
 
         # ----------------------------------------------------------------------
-        # SECTION 3: SYSTEM
+        # SYSTEM & STARTUP
         # ----------------------------------------------------------------------
         sec3 = tk.LabelFrame(
             container,
-            text=" SYSTEM STARTUP ",
+            text=" SYSTEM STARTUP & WORKSPACE ",
             font=("Consolas", 8, "bold"),
             fg=C_TEXT_MUTED,
             bg=C_PANEL_BG,
@@ -448,179 +644,186 @@ class SettingsDialog(tk.Toplevel):
             padx=10,
             pady=6,
         )
-        sec3.pack(fill="x", pady=6)
+        sec3.pack(fill="x", pady=4)
 
-        s_row = tk.Frame(sec3, bg=C_PANEL_BG)
-        s_row.pack(fill="x")
+        s_row1 = tk.Frame(sec3, bg=C_PANEL_BG)
+        s_row1.pack(fill="x", pady=2)
 
         self.var_autostart = tk.BooleanVar(value=self.config.start_with_windows)
-        cb_start = tk.Checkbutton(
-            s_row,
+        tk.Checkbutton(
+            s_row1,
             text="START WITH WINDOWS",
             variable=self.var_autostart,
-            font=("Consolas", 8, "bold"),
+            font=("Consolas", 8),
             fg=C_TEXT_WHITE,
             bg=C_PANEL_BG,
             selectcolor="#0D121D",
             activebackground=C_PANEL_BG,
-            activeforeground=C_TEXT_WHITE,
-        )
-        cb_start.pack(side="left")
+        ).pack(side="left")
 
         self.var_minimized = tk.BooleanVar(value=self.config.launch_minimized)
-        cb_min = tk.Checkbutton(
-            s_row,
-            text="LAUNCH MINIMIZED",
+        tk.Checkbutton(
+            s_row1,
+            text="START MINIMIZED",
             variable=self.var_minimized,
-            font=("Consolas", 8, "bold"),
+            font=("Consolas", 8),
             fg=C_TEXT_WHITE,
             bg=C_PANEL_BG,
             selectcolor="#0D121D",
             activebackground=C_PANEL_BG,
-            activeforeground=C_TEXT_WHITE,
-        )
-        cb_min.pack(side="right")
+        ).pack(side="right")
 
-        # ----------------------------------------------------------------------
-        # SECTION 4: INTEGRATIONS (DGX & REPO)
-        # ----------------------------------------------------------------------
-        sec4 = tk.LabelFrame(
-            container,
-            text=" HOST & WORKSPACE ",
-            font=("Consolas", 8, "bold"),
-            fg=C_TEXT_MUTED,
-            bg=C_PANEL_BG,
-            highlightbackground=C_BORDER,
-            highlightthickness=1,
-            bd=0,
-            padx=10,
-            pady=6,
-        )
-        sec4.pack(fill="x", pady=6)
-
-        i_row1 = tk.Frame(sec4, bg=C_PANEL_BG)
-        i_row1.pack(fill="x", pady=2)
-        tk.Label(i_row1, text="DGX HOST:", font=("Consolas", 8, "bold"), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=12, anchor="w").pack(side="left")
+        s_row2 = tk.Frame(sec3, bg=C_PANEL_BG)
+        s_row2.pack(fill="x", pady=2)
+        tk.Label(s_row2, text="DGX HOST:", font=("Consolas", 8), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=10, anchor="w").pack(side="left")
         self.var_dgx = tk.StringVar(value=self.config.dgx_host)
-        ent_dgx = tk.Entry(i_row1, textvariable=self.var_dgx, font=("Consolas", 9), bg="#0D121D", fg=C_TEXT_WHITE, insertbackground=C_CYAN)
-        ent_dgx.pack(side="left", fill="x", expand=True)
+        tk.Entry(s_row2, textvariable=self.var_dgx, font=("Consolas", 8), bg="#0D121D", fg=C_TEXT_WHITE, width=12).pack(side="left", padx=4)
 
-        i_row2 = tk.Frame(sec4, bg=C_PANEL_BG)
-        i_row2.pack(fill="x", pady=2)
-        tk.Label(i_row2, text="CODING REPO:", font=("Consolas", 8, "bold"), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=12, anchor="w").pack(side="left")
+        tk.Label(s_row2, text="REPO:", font=("Consolas", 8), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=6, anchor="e").pack(side="left", padx=(8, 2))
         self.var_repo = tk.StringVar(value=self.config.coding_repo_path)
-        ent_repo = tk.Entry(i_row2, textvariable=self.var_repo, font=("Consolas", 9), bg="#0D121D", fg=C_TEXT_WHITE, insertbackground=C_CYAN)
-        ent_repo.pack(side="left", fill="x", expand=True)
+        tk.Entry(s_row2, textvariable=self.var_repo, font=("Consolas", 8), bg="#0D121D", fg=C_TEXT_WHITE, width=14).pack(side="left", padx=4)
 
         # ----------------------------------------------------------------------
-        # BOTTOM BUTTONS
+        # ACTION BUTTONS
         # ----------------------------------------------------------------------
-        b_frame = tk.Frame(self, bg=C_BG)
-        b_frame.pack(fill="x", padx=16, pady=14)
+        btn_box = tk.Frame(self, bg=C_BG)
+        btn_box.pack(fill="x", padx=16, pady=(10, 16))
 
-        btn_save = tk.Button(
-            b_frame,
-            text="[ SAVE SETTINGS ]",
-            font=("Consolas", 10, "bold"),
-            bg="#0E2419",
-            fg=C_GREEN,
-            activebackground=C_GREEN,
-            activeforeground="#000000",
-            highlightbackground="#1E4733",
-            bd=1,
-            relief="solid",
-            cursor="hand2",
-            padx=12,
-            pady=6,
-            command=self._save_and_close,
-        )
-        btn_save.pack(side="left")
-
-        btn_cancel = tk.Button(
-            b_frame,
-            text="[ CANCEL ]",
-            font=("Consolas", 10),
-            bg="#161B26",
+        tk.Button(
+            btn_box,
+            text="CANCEL",
+            font=("Consolas", 9, "bold"),
+            bg="#161F2E",
             fg=C_TEXT_MUTED,
-            activebackground="#202838",
-            activeforeground=C_TEXT_WHITE,
             bd=1,
             relief="solid",
+            width=12,
             cursor="hand2",
-            padx=12,
-            pady=6,
             command=self.destroy,
-        )
-        btn_cancel.pack(side="right")
+        ).pack(side="left")
 
-    def _refresh_page_listbox(self):
-        cur_sel = self.listbox.curselection()
-        self.listbox.delete(0, tk.END)
-        for idx, p_id in enumerate(self.working_page_order):
-            is_enabled = self.working_enabled[p_id].get()
-            mark = "[X]" if is_enabled else "[ ]"
-            name = PAGE_LABELS.get(p_id, p_id.upper())
-            self.listbox.insert(tk.END, f" {mark}  {name}")
-            if not is_enabled:
-                self.listbox.itemconfig(idx, fg=C_TEXT_DIM)
-            else:
-                self.listbox.itemconfig(idx, fg=C_TEXT_WHITE)
+        tk.Button(
+            btn_box,
+            text="SAVE CONFIG",
+            font=("Consolas", 9, "bold"),
+            bg="#102E24",
+            fg=C_GREEN,
+            bd=1,
+            relief="solid",
+            width=14,
+            cursor="hand2",
+            command=self._save_and_close,
+        ).pack(side="right")
 
-        if cur_sel:
-            self.listbox.select_set(cur_sel[0])
+    # --------------------------------------------------------------------------
+    # LISTBOX REFRESH & HANDLERS
+    # --------------------------------------------------------------------------
+    def _refresh_sections_listbox(self):
+        self.sec_listbox.delete(0, "end")
+        for s in self.working_sections_order:
+            enabled = self.working_enabled_sections[s].get()
+            mark = "●" if enabled else "○"
+            title = SECTION_TITLES.get(s, s.upper())
+            self.sec_listbox.insert("end", f" {mark} {title}")
+        if self.working_sections_order:
+            idx = self.working_sections_order.index(self.selected_section) if self.selected_section in self.working_sections_order else 0
+            self.sec_listbox.select_set(idx)
+            self._refresh_cards_listbox()
 
-    def _on_list_select(self, event):
-        sel = self.listbox.curselection()
+    def _refresh_cards_listbox(self):
+        self.card_listbox.delete(0, "end")
+        sec = self.selected_section
+        self.lbl_cards_header.config(text=f"CARDS IN {SECTION_TITLES.get(sec, sec.upper())}")
+        cards = self.working_section_cards.get(sec, [])
+        for c in cards:
+            enabled = self.working_enabled_cards[c].get()
+            mark = "●" if enabled else "○"
+            label = PAGE_LABELS.get(c, c.upper())
+            self.card_listbox.insert("end", f" {mark} {label}")
+
+    def _on_section_selected(self, event=None):
+        sel = self.sec_listbox.curselection()
         if sel:
-            self.selected_page_idx = sel[0]
+            self.selected_section = self.working_sections_order[sel[0]]
+            self._refresh_cards_listbox()
 
-    def _move_up(self):
-        sel = self.listbox.curselection()
+    def _move_sec_up(self):
+        sel = self.sec_listbox.curselection()
         if not sel or sel[0] == 0:
             return
         idx = sel[0]
-        self.working_page_order[idx - 1], self.working_page_order[idx] = (
-            self.working_page_order[idx],
-            self.working_page_order[idx - 1],
-        )
-        self._refresh_page_listbox()
-        self.listbox.select_set(idx - 1)
-        self.selected_page_idx = idx - 1
+        self.working_sections_order[idx - 1], self.working_sections_order[idx] = self.working_sections_order[idx], self.working_sections_order[idx - 1]
+        self.selected_section = self.working_sections_order[idx - 1]
+        self._refresh_sections_listbox()
 
-    def _move_down(self):
-        sel = self.listbox.curselection()
-        if not sel or sel[0] >= len(self.working_page_order) - 1:
+    def _move_sec_down(self):
+        sel = self.sec_listbox.curselection()
+        if not sel or sel[0] >= len(self.working_sections_order) - 1:
             return
         idx = sel[0]
-        self.working_page_order[idx + 1], self.working_page_order[idx] = (
-            self.working_page_order[idx],
-            self.working_page_order[idx + 1],
-        )
-        self._refresh_page_listbox()
-        self.listbox.select_set(idx + 1)
-        self.selected_page_idx = idx + 1
+        self.working_sections_order[idx + 1], self.working_sections_order[idx] = self.working_sections_order[idx], self.working_sections_order[idx + 1]
+        self.selected_section = self.working_sections_order[idx + 1]
+        self._refresh_sections_listbox()
 
-    def _toggle_selected(self):
-        sel = self.listbox.curselection()
+    def _toggle_sec(self):
+        sel = self.sec_listbox.curselection()
         if not sel:
             return
-        idx = sel[0]
-        p_id = self.working_page_order[idx]
-        cur_val = self.working_enabled[p_id].get()
-        self.working_enabled[p_id].set(not cur_val)
-        self._refresh_page_listbox()
+        s = self.working_sections_order[sel[0]]
+        cur = self.working_enabled_sections[s].get()
+        self.working_enabled_sections[s].set(not cur)
+        self._refresh_sections_listbox()
 
-    def _show_system_health(self):
-        FirstRunDialog(self, self.config, on_open_dashboard=lambda: None)
+    def _move_card_up(self):
+        sel = self.card_listbox.curselection()
+        cards = self.working_section_cards.get(self.selected_section, [])
+        if not sel or sel[0] == 0:
+            return
+        idx = sel[0]
+        cards[idx - 1], cards[idx] = cards[idx], cards[idx - 1]
+        self._refresh_cards_listbox()
+        self.card_listbox.select_set(idx - 1)
+
+    def _move_card_down(self):
+        sel = self.card_listbox.curselection()
+        cards = self.working_section_cards.get(self.selected_section, [])
+        if not sel or sel[0] >= len(cards) - 1:
+            return
+        idx = sel[0]
+        cards[idx + 1], cards[idx] = cards[idx], cards[idx + 1]
+        self._refresh_cards_listbox()
+        self.card_listbox.select_set(idx + 1)
+
+    def _toggle_card(self):
+        sel = self.card_listbox.curselection()
+        cards = self.working_section_cards.get(self.selected_section, [])
+        if not sel:
+            return
+        c = cards[sel[0]]
+        cur = self.working_enabled_cards[c].get()
+        self.working_enabled_cards[c].set(not cur)
+        self._refresh_cards_listbox()
+        self.card_listbox.select_set(sel[0])
+
+    def _apply_preset_ui(self, preset_name: str):
+        self.config.apply_preset(preset_name)
+        for s in ALL_SECTIONS:
+            self.working_enabled_sections[s].set(self.config.enabled_sections[s])
+        for c in ALL_PAGE_IDS:
+            self.working_enabled_cards[c].set(self.config.enabled_cards[c])
+        self._refresh_sections_listbox()
+
+    def _show_claude_diagnostics(self):
+        ClaudeAccountsDialog(self, self.config)
 
     def _save_and_close(self):
-        # Update config fields
-        self.config.page_order = list(self.working_page_order)
-        self.config.enabled_pages = [
-            p for p in self.working_page_order if self.working_enabled[p].get()
-        ]
-        if not self.config.enabled_pages:
-            self.config.enabled_pages = ["btc"]
+        self.config.sections_order = list(self.working_sections_order)
+        self.config.enabled_sections = {s: self.working_enabled_sections[s].get() for s in ALL_SECTIONS}
+        self.config.section_cards = {s: list(self.working_section_cards[s]) for s in ALL_SECTIONS}
+        self.config.enabled_cards = {c: self.working_enabled_cards[c].get() for c in ALL_PAGE_IDS}
+
+        # Keep enabled_pages in sync
+        self.config.enabled_pages = [c for c in ALL_PAGE_IDS if self.config.enabled_cards.get(c, True)]
 
         self.config.minitoo_port = self.var_port.get().strip()
         try:

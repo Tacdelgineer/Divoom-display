@@ -24,43 +24,60 @@ If using the physical Divoom MiniToo display:
 5. The application automatically enumerates Bluetooth SPP serial ports and links to your MiniToo. The status in the header will switch to **MINITOO OK**.
 
 ### 3. Customize Your Dashboard
-- Click the **GEAR** icon in the top-right corner to open Settings.
-- **Enable / Disable Pages**: Toggle checkboxes for any page you want to see.
-- **Reorder Pages**: Select a page and click **▲ Move Up** or **▼ Move Down**.
-- **Rotation Interval**: Adjust seconds per page for automatic cycling.
+- **Switch Presets**: Use the header buttons `[ ALL ]`, `[ AI ]`, `[ MARKETS ]`, `[ SYSTEM ]` for instant focus filtering.
+- **Section & Card Reordering**: Click the **GEAR** icon in the top-right corner to open Settings.
+- **Enable / Disable Sections**: Toggle entire groups (`CRYPTO`, `AI USAGE`, `SYSTEM`, `STOCKS`).
+- **Enable / Disable Cards**: Toggle individual widgets inside sections.
+- **Rotation Interval**: Adjust seconds per page for automatic MiniToo physical cycling.
 - **Start with Windows**: Enable to automatically launch the dashboard on system boot.
 
 ---
 
-## Optional Integrations & Graceful Fallbacks
+## Data Providers & Integrations
 
-AI Desk Dashboard connects to local developer tools and workstation services. **Every integration is completely optional and failure-safe**: if an integration is unconfigured or unavailable, the rest of the dashboard continues updating smoothly.
+AI Desk Dashboard connects to local developer tools, system sensors, and market feeds. **Every integration is completely optional and failure-safe**: if an integration is unconfigured or unavailable, the rest of the dashboard continues updating smoothly.
 
-### 1. OpenAI Codex
+### 1. Multi-Asset Crypto (`BTC`, `ETH`, `SOL`, `DOGE`, `PEPE`)
+- **How it works**: Queries live spot prices, 24-hour deltas, and highs/lows for 5 major assets simultaneously using a **single** CoinGecko simple price request.
+- **Cache**: 60-second local JSON cache (`.crypto_cache.json`) to stay within public rate limits without needing exchange credentials.
+- **Micro-Token Formatting**: For tokens under $0.01 (such as PEPE at ~$0.0000045), prices format cleanly as `$0.0000045` on desktop and `$4.5u` on MiniToo displays.
+
+### 2. Top 10 Volatile US Stocks Scanner
+- **How it works**: Evaluates a high-volume liquid US equities basket and ranks the Top 10 by objective intraday volatility:
+  $$\text{Volatility \%} = \frac{\text{Day High} - \text{Day Low}}{\text{Previous Close}} \times 100$$
+- **Default Provider**: `YahooFinanceMarketDataProvider` (zero API key required; fetches quotes via session cookies and crumbs with a 60-second cache).
+- **Optional Finnhub Provider**: Set the environment variable `FINNHUB_API_KEY` to route quotes through Finnhub's official REST API.
+- **Market Hours**: Automatically detects regular trading hours (`OPEN`), pre-market (`PRE`), after-hours (`POST`), or weekend/holiday (`CLOSED`).
+
+### 3. Anthropic Claude (Diagnostics & Secondary Profile)
+- **Account Discovery**: Safely inspects active authentication from `~/.claude.json`. Displays account email (masked: `no***@gmail.com`), subscription plan tier, and auth type.
+- **Diagnostics Dialog**: Click **CLAUDE ACCOUNTS** in Settings or on the Claude card to view active profile details, environment variable precedence, and usage cache status.
+- **Adding a Secondary Account**:
+  Claude Code does not support simultaneous logins in the same directory, but natively supports `CLAUDE_CONFIG_DIR`. To configure a secondary profile:
+  1. Open PowerShell and run:
+     ```powershell
+     $env:CLAUDE_CONFIG_DIR = "$HOME\.claude-secondary"
+     claude auth login
+     ```
+  2. In AI Desk Dashboard, the secondary profile will be read from its isolated folder without altering your primary Claude session.
+
+### 4. OpenAI Codex
 - **How it works**: Reads your local authenticated Codex CLI session from `~/.codex/auth.json` to query authoritative remaining quota directly from ChatGPT's backend usage API.
 - **If missing / unauthenticated**: The Codex card displays `READY` or `N/A`. No errors or crashes occur.
 
-### 2. Google Gemini & Antigravity
+### 5. Google Gemini & Antigravity
 - **How it works**: Queries Google's backend quota via the official Antigravity CLI (`agy -p /quota`).
 - **If missing / unauthenticated**: The Gemini card displays `LOCAL ONLY` or plan tier with safe fallback values.
 
-### 3. Anthropic Claude
-- **How it works**: Displays active Claude session state and current model tier.
-- **Note on Anthropic quotas**: Anthropic does not currently provide a public personal quota API. The card displays active status without guessing or fabricating numbers.
-
-### 4. NVIDIA GPU (Local PC)
+### 6. NVIDIA GPU (Local PC)
 - **How it works**: Queries `nvidia-smi` every 2 seconds for GPU utilization, VRAM usage, and core temperature. System RAM and CPU are collected via `psutil`.
 - **If missing / non-NVIDIA**: The GPU row gracefully hides or displays `UNAVAILABLE`, while CPU and RAM metrics remain fully active.
 
-### 5. Remote DGX Spark
+### 7. Remote DGX Spark
 - **How it works**: Probes remote cluster metrics via SSH or Tailscale. Configurable under Settings via `DGX Host / IP` (default: `dgx`).
 - **If offline or unreachable**: The card displays an `OFFLINE` badge with cached timestamps. Background polling has a strict 3-second timeout that will never freeze the desktop UI.
 
-### 6. Bitcoin (BTC)
-- **How it works**: Fetches live spot price and 24-hour delta from public crypto APIs (CoinGecko / Binance) with automatic 60-second caching.
-- **If offline**: Re-renders the last cached sparkline and price without interrupting page rotation.
-
-### 7. Git / Coding Workspace
+### 8. Git / Coding Workspace
 - **How it works**: Checks git branch, uncommitted diffs, and recent commit history for the configured repository path.
 - **If not a git repository**: Displays directory name and standard status.
 
@@ -87,7 +104,7 @@ python -m venv venv
 .\venv\Scripts\Activate.ps1
 
 # Upgrade pip and install dependencies
-pip install --upgrade pip
+python -m pip install --upgrade pip
 pip install -r requirements-dev.txt
 ```
 
@@ -105,6 +122,9 @@ python dashboard.py --cycle --interval 5.0
 
 # Export static 160x128 preview PNGs
 python dashboard.py --preview
+
+# Run unit tests
+pytest tests/ -v
 ```
 
 ### 3. Build Windows Executable

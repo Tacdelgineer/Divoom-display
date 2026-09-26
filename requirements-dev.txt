@@ -1,0 +1,5 @@
+# AI Desk Dashboard - Development & Packaging Dependencies
+-r requirements.txt
+pyinstaller>=6.4.0
+pytest>=7.4.0
+flake8>=6.1.0

@@ -1,0 +1,50 @@
+# ==============================================================================
+# AI Desk Dashboard - Git Ignore Rules
+# ==============================================================================
+
+# Python bytecode & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# PyInstaller working directories & intermediate build files
+build/
+dist/
+*.spec
+
+# Local and remote caches
+.*_cache.json
+*.cache.json
+.dgx_cache.json
+.btc_cache.json
+.services_cache.json
+
+# Local diagnostic and launch logs
+*.log
+launch.log
+
+# Temporary and test image outputs
+screen.png
+claude_screen.png
+preview_*.png
+test_*.png
+test_dashboard_160x128.png
+
+# Secrets & credentials (defense in depth)
+.env
+*.pem
+*.key
+auth.json
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/

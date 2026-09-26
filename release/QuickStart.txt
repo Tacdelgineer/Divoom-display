@@ -1,0 +1,30 @@
+==============================================================================
+AI Desk Dashboard - v0.1.0 Early Preview
+==============================================================================
+
+Welcome to AI Desk Dashboard!
+
+Quick Start:
+1. Double-click "AI Desk Dashboard.exe" to launch.
+2. If using the physical Divoom MiniToo hardware:
+   - Turn on MiniToo.
+   - Pair with Windows via Bluetooth Settings (Settings > Bluetooth & devices).
+   - Launch AI Desk Dashboard.
+   - The device will be detected automatically and locked into Channel 5.
+3. If using desktop-only mode:
+   - No hardware is needed! The desktop companion runs standalone.
+4. Click the GEAR icon on the top-right of the desktop window to configure:
+   - Enabled / disabled dashboard pages
+   - Page rotation order and speed
+   - Remote DGX host or IP
+   - Windows autostart
+
+Troubleshooting:
+- Startup logs are stored in:
+  %APPDATA%\AiDeskDashboard\launch.log
+- Settings are saved in:
+  %APPDATA%\AiDeskDashboard\config.json
+
+Repository & Source Code:
+https://github.com/Tacdelgineer/Divoom-display
+==============================================================================

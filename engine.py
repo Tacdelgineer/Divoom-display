@@ -678,7 +678,7 @@ class DitooController:
         if asset_type == "crypto":
             asset_obj = self._crypto_data.get(symbol.lower())
             price = asset_obj.price if asset_obj else 0.0
-            change_pct = asset_obj.change_24h if asset_obj else 0.0
+            change_pct = asset_obj.change_24h_pct if asset_obj else 0.0
 
             if self._frame_step == 0:
                 img = Crypto16Renderer.render_icon_frame(symbol)

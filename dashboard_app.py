@@ -60,6 +60,15 @@ from src.renderers.ditoo_16 import (
 )
 
 
+def rgb_to_hex(color: Any, default: str = "#00F5D4") -> str:
+    """Convert RGB tuple or string to valid Tkinter hex color string."""
+    if isinstance(color, (tuple, list)) and len(color) >= 3:
+        return f"#{int(color[0]):02x}{int(color[1]):02x}{int(color[2]):02x}"
+    if isinstance(color, str):
+        return color
+    return default
+
+
 # Setup launch-time logging
 def setup_logging():
     log_file = get_log_path()
@@ -693,7 +702,8 @@ class DesktopDashboardApp:
         # Active Asset & Frame info
         active_sym = self.state.ditoo_active_asset
         frame_t = self.state.ditoo_active_frame_type
-        brand_c = CRYPTO_BRAND_COLORS.get(active_sym, BRAND_COLORS.get(active_sym, C_GOLD))
+        brand_raw = CRYPTO_BRAND_COLORS.get(active_sym, BRAND_COLORS.get(active_sym, C_GOLD))
+        brand_c = rgb_to_hex(brand_raw, C_GOLD)
         self.canvas.create_text(info_x, c1_y1 + 42, text="CURRENT ASSET:", font=("Consolas", 8), fill=C_TEXT_MUTED, anchor="w")
         self.canvas.create_text(info_x + 95, c1_y1 + 42, text=f"[ {active_sym} ]", font=("Consolas", 10, "bold"), fill=brand_c, anchor="w")
 
@@ -763,15 +773,16 @@ class DesktopDashboardApp:
 
             self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=c_bg, outline=c_border, width=1)
             mark = "[✓]" if is_coin_on else "[ ]"
-            coin_color = CRYPTO_BRAND_COLORS.get(coin.upper(), C_WHITE) if is_coin_on else C_TEXT_DIM
+            coin_raw = CRYPTO_BRAND_COLORS.get(coin.upper(), C_TEXT_WHITE)
+            coin_color = rgb_to_hex(coin_raw, C_TEXT_WHITE) if is_coin_on else C_TEXT_DIM
             self.canvas.create_text(bx1 + 8, by1 + 12, text=f"{mark} {coin.upper()}", font=("Consolas", 8, "bold"), fill=coin_color, anchor="w")
 
             # Show price / delta
             asset_data = self.ditoo._crypto_data.get(coin)
             if asset_data:
                 p_str = format_abbreviated_price(asset_data.price)
-                d_str, d_col = format_delta_pct(asset_data.change_24h)
-                self.canvas.create_text(bx1 + 8, by1 + 25, text=f"{p_str} {d_str}", font=("Consolas", 7), fill=d_col if is_coin_on else C_TEXT_DIM, anchor="w")
+                d_str, d_col = format_delta_pct(asset_data.change_24h_pct)
+                self.canvas.create_text(bx1 + 8, by1 + 25, text=f"{p_str} {d_str}", font=("Consolas", 7), fill=rgb_to_hex(d_col, C_GREEN) if is_coin_on else C_TEXT_DIM, anchor="w")
             else:
                 self.canvas.create_text(bx1 + 8, by1 + 25, text="Loading...", font=("Consolas", 7), fill=C_TEXT_DIM, anchor="w")
 
@@ -814,7 +825,8 @@ class DesktopDashboardApp:
             self.canvas.create_text(c3_x1 + 20, ry + 11, text=f"#{idx + 1}", font=("Consolas", 8, "bold"), fill=C_TEXT_DIM, anchor="w")
 
             # Symbol & Brand
-            sym_col = BRAND_COLORS.get(sym, C_ACTIVE_CYAN)
+            sym_raw = BRAND_COLORS.get(sym, C_ACTIVE_CYAN)
+            sym_col = rgb_to_hex(sym_raw, C_ACTIVE_CYAN)
             self.canvas.create_text(c3_x1 + 55, ry + 11, text=sym, font=("Consolas", 9, "bold"), fill=sym_col, anchor="w")
 
             # Price & Delta from live cache

@@ -18,17 +18,21 @@
 
 ## ⚡ Highlights
 
-- **Multi-Device Hardware Model**: Stream 160×128 pixel frames live to a **Divoom MiniToo** desk display over Bluetooth SPP, or stream dedicated 16×16 pixel art financial pages to a **Divoom Ditoo / Ditoo Plus** over direct BLE GATT.
-- **Dedicated 16×16 Ditoo Pixel Engine**: Purpose-built micro-pixel renderer for 16×16 displays with custom 3×5 typography, crisp Bitcoin coin badges, and rotating/scrolling stock pages (NVDA, TSLA, AAPL, MSFT, META).
+- **Multi-Device Hardware Controller**: Stream 160×128 pixel frames live to a **Divoom MiniToo** desk display over Bluetooth SPP, or stream dedicated 16×16 pixel art financial pages to a **Divoom Ditoo / Ditoo Plus** over direct BLE GATT (`DitooPro-Light`).
+- **Prominent Device Selector**: Instantly switch between **MiniToo**, **Ditoo (16x16)**, and side-by-side **Dual Preview** tabs directly from the header.
+- **Dedicated 16×16 Ditoo Pixel Controller**:
+  - **Crypto 3-Frame Cycles**: BTC, ETH, SOL, DOGE, PEPE individually toggleable with handcrafted 16×16 pixel art coin icons -> compact USD price -> 24h delta % with up/down directional markers.
+  - **Stock 3-Frame Cycles**: Configurable tickers (NVDA, TSLA, AAPL, MSFT, META default) with symbol banner -> current price -> daily % change, plus live Add/Remove/Reorder controls.
+  - **Custom Rotation Timing**: Configurable dwell intervals (default: 1.0s logo, 2.0s price, 2.0s delta), auto-rotation toggle, pause/resume, and hardware LED brightness adjustment.
+  - **Crisp Nearest-Neighbor Live Preview**: Real-time 160×160 preview mirroring exact pixels streamed over BLE with asset telemetry and market update timestamps.
+- **Audio Routing Isolation**: Communicates exclusively with the BLE pixel/control endpoint `DitooPro-Light`. Never touches, selects, or interferes with Windows audio routing or `DitooPro-Audio`.
+- **Automatic Reconnection & Offline Resilience**: Background BLE auto-reconnect engine automatically detects when the Ditoo returns and resumes rotation. Cached market data guarantees zero blank screens during API or network downtime.
+- **Windows Startup**: Optional "Start with Windows" setting via user registry (`HKCU\Run`), launching minimized without requiring administrator privileges.
 - **Configurable Sections & Presets**: Organize widgets into 4 modular sections (**CRYPTO**, **AI USAGE**, **SYSTEM**, **STOCKS**) with instant presets (**ALL**, **AI**, **MARKETS**, **SYSTEM**), full reordering, and visibility toggles.
-- **Multi-Asset Crypto Markets**: Real-time ticker prices, 24H percentage delta, and 24H phosphor sparklines for **BTC**, **ETH**, **SOL**, **DOGE**, and **PEPE** via a single consolidated public market-data request.
 - **Top 10 Volatile Stocks Scanner**: Scans high-beta US equities and ranks the top 10 most volatile stocks today using an objective, measurable intraday range formula: `(high - low) / previous_close * 100`.
 - **AI Quota Tracking (% LEFT)**: Tracks live, authoritative quotas for **OpenAI Codex** and **Google Gemini / Antigravity**, enforcing strict `% LEFT` remaining semantics everywhere.
-- **Claude Multi-Account Diagnostics**: Identifies active Claude account (`no***@gmail.com`), subscription plan, auth type, probes environment variable precedence (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, etc.), and supports isolated secondary authentication directories.
-- **Physical Knob Navigation**: Turn the physical MiniToo volume dial clockwise or counter-clockwise to cycle dashboard cards with base-volume restoration (zero audio disruption).
-- **GPU & Remote Node Telemetry**: Real-time local NVIDIA RTX telemetry (`nvidia-smi`) and remote Linux/DGX GPU cluster health via lightweight SSH/Tailscale socket probes.
-- **Zero-Flicker Background Architecture**: Engineered with strict non-blocking timeouts and Windows `CREATE_NO_WINDOW` wrappers—zero console window popping or UI lag.
-- **Independent Component Failure**: Every data provider fails gracefully in isolation. If remote DGX is asleep or an AI CLI is unauthenticated, all other dashboard widgets continue updating normally.
+- **Claude Multi-Account Diagnostics**: Identifies active Claude account (`no***@gmail.com`), subscription plan, auth type, probes environment variable precedence, and supports isolated secondary authentication directories.
+- **Physical Controls Investigation**: Rigorously documented BLE GATT telemetry showing Ditoo MCU firmware reserves mechanical keyboard/lever inputs internally for onboard clock/games, while dashboard UI provides comprehensive software controls.
 
 ---
 

@@ -175,22 +175,45 @@ class DitooDevice:
             return True
         return False
 
-    async def connect_ble(self, timeout: float = 8.0) -> bool:
-        """Connect directly to DitooPro-Light over BLE."""
+    async def connect_ble(self, timeout: float = 6.0) -> bool:
+        """Connect to DitooPro-Light over BLE with remembered MAC and scanner fallback."""
         if BleakClient is None:
             print("[DITOO] bleak library not installed.")
             return False
-        try:
-            print(f"[DITOO] Connecting to BLE peripheral {self.ble_address}...")
-            self.ble_client = BleakClient(self.ble_address)
-            await asyncio.wait_for(self.ble_client.connect(), timeout=timeout)
-            if self.ble_client.is_connected:
-                print(f"[DITOO] Connected over BLE! (MTU: {self.ble_client.mtu_size})")
-                self._is_connected = True
-                return True
-        except Exception as e:
-            print(f"[DITOO] BLE connection error: {e}")
-            self.ble_client = None
+
+        # 1. Try direct connection with remembered MAC if valid
+        if self.ble_address and self.ble_address != "AUTO":
+            try:
+                print(f"[DITOO] Connecting to BLE peripheral {self.ble_address}...")
+                self.ble_client = BleakClient(self.ble_address)
+                await asyncio.wait_for(self.ble_client.connect(), timeout=timeout)
+                if self.ble_client.is_connected:
+                    print(f"[DITOO] Connected over BLE! (MTU: {self.ble_client.mtu_size})")
+                    self._is_connected = True
+                    return True
+            except Exception as e:
+                print(f"[DITOO] Direct BLE connection failed: {e}")
+                self.ble_client = None
+
+        # 2. Scanner fallback: discover DitooPro-Light peripheral
+        if BleakScanner is not None:
+            try:
+                print("[DITOO] Scanning for 'DitooPro-Light' BLE peripheral...")
+                devices = await BleakScanner.discover(timeout=4.0)
+                for d in devices:
+                    if d.name and "DitooPro-Light" in d.name:
+                        print(f"[DITOO] Discovered {d.name} at {d.address}!")
+                        self.ble_address = d.address
+                        self.ble_client = BleakClient(d.address)
+                        await asyncio.wait_for(self.ble_client.connect(), timeout=timeout)
+                        if self.ble_client.is_connected:
+                            print(f"[DITOO] Connected via discovery! (MTU: {self.ble_client.mtu_size})")
+                            self._is_connected = True
+                            return True
+            except Exception as scan_err:
+                print(f"[DITOO] BLE scanner fallback error: {scan_err}")
+                self.ble_client = None
+
         return False
 
     def connect_serial(self) -> bool:
@@ -271,6 +294,12 @@ class DitooDevice:
                 await asyncio.sleep(0.04)
 
         return True
+
+    async def set_brightness(self, brightness: int = 100) -> bool:
+        """Set screen brightness (0-100) via Divoom Command 0x74."""
+        b = max(0, min(100, int(brightness)))
+        pkt = frame_spp(0x74, bytes([b]))
+        return await self.send_packet(pkt)
 
     async def set_solid_color(self, r: int, g: int, b: int, brightness: int = 100) -> bool:
         """Command 0x45 instant solid color fill."""

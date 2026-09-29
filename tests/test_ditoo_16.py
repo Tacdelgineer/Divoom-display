@@ -132,3 +132,66 @@ def test_ditoo_solid_color_packet():
     assert pkt[6] == 0     # G
     assert pkt[7] == 0     # B
     assert pkt[8] == 100   # Brightness
+
+
+def test_crypto_16_all_supported_coins():
+    from src.renderers.ditoo_16 import Crypto16Renderer, CRYPTO_ICONS
+
+    coins = ["BTC", "ETH", "SOL", "DOGE", "PEPE"]
+    for coin in coins:
+        assert coin in CRYPTO_ICONS
+        icon = Crypto16Renderer.render_icon_frame(coin)
+        assert icon.size == (16, 16)
+
+        # Check price frame
+        p_frame = Crypto16Renderer.render_price_frame(coin, 123.45)
+        assert p_frame.size == (16, 16)
+
+        # Check cycle frames
+        cycle = Crypto16Renderer.render_cycle_frames(coin, 123.45, 2.5)
+        assert len(cycle) == 3
+        for f in cycle:
+            assert f.size == (16, 16)
+
+
+def test_punctuation_kerning_fits_16px():
+    # Crucial for 16x16: ensure $84K, $4.1K, +2.4%, -1.2%, $0.18, 9.8u fit <= 15px
+    test_strings = ["$84K", "$4.1K", "+2.4%", "-1.2%", "$0.18", "9.8U", "$192", "$25.7"]
+    for s in test_strings:
+        w = measure_text(s, FONT_3x5)
+        assert w <= 15, f"String '{s}' width {w} exceeds 15px limit on 16x16 screen!"
+
+
+def test_stock_provider_batch_and_cache():
+    from market_provider import YahooFinanceMarketDataProvider, StockQuote
+    
+    provider = YahooFinanceMarketDataProvider()
+    sq1 = StockQuote(
+        symbol="NVDA",
+        name="NVIDIA Corporation",
+        price=120.5,
+        change_pct=2.1,
+        volatility_pct=3.5,
+        high=122.0,
+        low=118.0,
+        previous_close=118.0,
+    )
+    sq2 = StockQuote(
+        symbol="TSLA",
+        name="Tesla Inc",
+        price=210.0,
+        change_pct=-1.8,
+        volatility_pct=4.2,
+        high=215.0,
+        low=208.0,
+        previous_close=213.8,
+    )
+    provider._write_cache([sq1, sq2])
+    
+    quotes = provider.get_quotes_for_symbols(["NVDA", "TSLA"])
+    assert "NVDA" in quotes
+    assert quotes["NVDA"].price == 120.5
+    assert "TSLA" in quotes
+    assert quotes["TSLA"].price == 210.0
+
+

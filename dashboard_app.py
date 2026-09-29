@@ -20,7 +20,9 @@ import sys
 import time
 import tkinter as tk
 from tkinter import font as tkfont
+from tkinter import simpledialog
 from typing import Optional, Dict, Tuple, Any, List
+from PIL import Image, ImageTk
 
 from config import (
     DashboardConfig,
@@ -43,9 +45,19 @@ from engine import (
     DashboardState,
     DataEngine,
     MiniTooController,
+    DitooController,
     WindowsAutostart,
 )
 from models import PageData, MetricItem
+from src.renderers.ditoo_16 import (
+    Crypto16Renderer,
+    Stock16Renderer,
+    format_abbreviated_price,
+    format_delta_pct,
+    upscale_preview,
+    BRAND_COLORS,
+    CRYPTO_BRAND_COLORS,
+)
 
 
 # Setup launch-time logging
@@ -149,19 +161,26 @@ class DesktopDashboardApp:
             wy = max(10, min(self.config.window_y, 1440))
             self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{wx}+{wy}")
 
-        if self.config.launch_minimized:
+        if self.config.launch_minimized or "--minimized" in sys.argv:
             self.root.iconify()
 
         # 2. Initialize Shared State & Background Workers
         self.state = DashboardState(config=self.config)
         self.engine = DataEngine(self.state, config=self.config)
         self.minitoo = MiniTooController(self.state, config=self.config)
+        self.ditoo = DitooController(self.state, config=self.config)
 
         self.autostart_enabled = WindowsAutostart.is_enabled()
         self.hovered_card: Optional[str] = None
         self.card_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self.preset_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self.btn_bounds: Dict[str, Tuple[int, int, int, int]] = {}
+        self.device_tab_bounds: Dict[str, Tuple[int, int, int, int]] = {}
+        self.ditoo_btn_bounds: Dict[str, Tuple[int, int, int, int]] = {}
+        self.ditoo_crypto_bounds: Dict[str, Tuple[int, int, int, int]] = {}
+        self.ditoo_stock_bounds: Dict[str, Tuple[int, int, int, int]] = {}
+        self._ditoo_photo = None
+        self._minitoo_photo = None
 
         # 3. Build GUI Canvas with scroll support
         self.canvas = tk.Canvas(
@@ -182,6 +201,7 @@ class DesktopDashboardApp:
         self.state.add_listener(self._on_state_event)
         self.engine.start()
         self.minitoo.start()
+        self.ditoo.start()
 
         if not self.config.first_run_completed:
             self.root.after(150, self._show_first_run)
@@ -192,7 +212,14 @@ class DesktopDashboardApp:
         FirstRunDialog(self.root, self.config, on_open_dashboard=self._render_gui)
 
     def _on_state_event(self, event_type: str, data: Any):
-        if event_type in ("page_updated", "minitoo_status_changed", "minitoo_page_changed"):
+        if event_type in (
+            "page_updated",
+            "minitoo_status_changed",
+            "minitoo_page_changed",
+            "ditoo_status_changed",
+            "ditoo_frame_updated",
+            "device_target_changed",
+        ):
             self.root.after_idle(self._render_gui)
 
     def _on_mousewheel(self, event):
@@ -207,16 +234,32 @@ class DesktopDashboardApp:
         for p_id, (x1, y1, x2, y2) in self.card_bounds.items():
             if x1 <= canvas_x <= x2 and y1 <= canvas_y <= y2:
                 self.hovered_card = p_id
-                self.canvas.config(cursor="hand2")
                 break
-        else:
-            # Check header buttons
-            for b_name, (x1, y1, x2, y2) in {**self.preset_bounds, **self.btn_bounds}.items():
-                if x1 <= event.x <= x2 and y1 <= event.y <= y2:
-                    self.canvas.config(cursor="hand2")
+
+        # Check all clickable elements for hand cursor
+        has_hand = False
+        clickable_bounds = [
+            self.card_bounds,
+            self.preset_bounds,
+            self.btn_bounds,
+            self.device_tab_bounds,
+            self.ditoo_btn_bounds,
+            self.ditoo_crypto_bounds,
+            self.ditoo_stock_bounds,
+        ]
+        for b_dict in clickable_bounds:
+            for b_name, (bx1, by1, bx2, by2) in b_dict.items():
+                if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
+                    has_hand = True
                     break
-            else:
-                self.canvas.config(cursor="")
+                # Or check canvas coordinates for scrolled elements
+                if bx1 <= canvas_x <= bx2 and by1 <= canvas_y <= by2:
+                    has_hand = True
+                    break
+            if has_hand:
+                break
+
+        self.canvas.config(cursor="hand2" if has_hand else "")
 
         if self.hovered_card != prev_hover:
             self._render_gui()
@@ -226,13 +269,14 @@ class DesktopDashboardApp:
         canvas_x = self.canvas.canvasx(x)
         canvas_y = self.canvas.canvasy(y)
 
-        # 1. Preset buttons
-        for p_name, (bx1, by1, bx2, by2) in self.preset_bounds.items():
-            if bx1 <= x <= bx2 and by1 <= y <= by2:
-                print(f"[APP] Applying Preset: {p_name}")
-                self.config.apply_preset(p_name)
-                self.config.save()
-                self._render_gui()
+        # 1. Device Tab selector
+        for dev_name, (dx1, dy1, dx2, dy2) in self.device_tab_bounds.items():
+            if dx1 <= x <= dx2 and dy1 <= y <= dy2:
+                if self.config.target_device != dev_name:
+                    print(f"[APP] Switching target device -> {dev_name.upper()}")
+                    self.config.target_device = dev_name
+                    self.config.save()
+                    self._render_gui()
                 return
 
         # 2. Autostart button
@@ -254,14 +298,112 @@ class DesktopDashboardApp:
                 self._open_settings()
                 return
 
-        # 4. Card clicked -> route to MiniToo
-        for p_id, (cx1, cy1, cx2, cy2) in self.card_bounds.items():
-            if cx1 <= canvas_x <= cx2 and cy1 <= canvas_y <= cy2:
-                if self.config.enabled_cards.get(p_id, True):
-                    print(f"[APP] Card clicked: {p_id.upper()} -> Routing to MiniToo")
-                    self.minitoo.push_page(p_id)
+        # 4. Preset buttons (in MiniToo mode)
+        for p_name, (bx1, by1, bx2, by2) in self.preset_bounds.items():
+            if bx1 <= x <= bx2 and by1 <= y <= by2:
+                print(f"[APP] Applying Preset: {p_name}")
+                self.config.apply_preset(p_name)
+                self.config.save()
+                self._render_gui()
+                return
+
+        # 5. Ditoo Controls (when in Ditoo mode)
+        if self.config.target_device == "ditoo":
+            # Action buttons
+            for btn_key, (bx1, by1, bx2, by2) in self.ditoo_btn_bounds.items():
+                if (bx1 <= canvas_x <= bx2 and by1 <= canvas_y <= by2) or (bx1 <= x <= bx2 and by1 <= y <= by2):
+                    if btn_key == "pause":
+                        self.ditoo.toggle_pause()
+                    elif btn_key == "prev":
+                        self.ditoo.prev_asset()
+                    elif btn_key == "next":
+                        self.ditoo.next_asset()
+                    elif btn_key == "rot_toggle":
+                        self.config.ditoo_auto_rotation = not self.config.ditoo_auto_rotation
+                        self.config.save()
+                    elif btn_key == "bright_down":
+                        b = max(10, self.config.ditoo_brightness - 10)
+                        self.ditoo.set_brightness(b)
+                    elif btn_key == "bright_up":
+                        b = min(100, self.config.ditoo_brightness + 10)
+                        self.ditoo.set_brightness(b)
+                    elif btn_key == "crypto_master":
+                        self.config.ditoo_enabled_crypto_page = not self.config.ditoo_enabled_crypto_page
+                        self.config.save()
+                        self.ditoo.update_config(self.config)
+                    elif btn_key == "stock_master":
+                        self.config.ditoo_enabled_stock_page = not self.config.ditoo_enabled_stock_page
+                        self.config.save()
+                        self.ditoo.update_config(self.config)
+                    elif btn_key == "dwell_logo_down":
+                        self.config.ditoo_frame_logo_dwell = max(0.5, round(self.config.ditoo_frame_logo_dwell - 0.5, 1))
+                        self.config.save()
+                    elif btn_key == "dwell_logo_up":
+                        self.config.ditoo_frame_logo_dwell = min(10.0, round(self.config.ditoo_frame_logo_dwell + 0.5, 1))
+                        self.config.save()
+                    elif btn_key == "dwell_price_down":
+                        self.config.ditoo_frame_price_dwell = max(0.5, round(self.config.ditoo_frame_price_dwell - 0.5, 1))
+                        self.config.save()
+                    elif btn_key == "dwell_price_up":
+                        self.config.ditoo_frame_price_dwell = min(10.0, round(self.config.ditoo_frame_price_dwell + 0.5, 1))
+                        self.config.save()
+                    elif btn_key == "dwell_change_down":
+                        self.config.ditoo_frame_change_dwell = max(0.5, round(self.config.ditoo_frame_change_dwell - 0.5, 1))
+                        self.config.save()
+                    elif btn_key == "dwell_change_up":
+                        self.config.ditoo_frame_change_dwell = min(10.0, round(self.config.ditoo_frame_change_dwell + 0.5, 1))
+                        self.config.save()
+                    elif btn_key == "add_stock":
+                        new_sym = simpledialog.askstring("Add Stock Ticker", "Enter US Stock Symbol (e.g. AMZN, COIN, AMD):", parent=self.root)
+                        if new_sym:
+                            s_clean = new_sym.strip().upper()
+                            if s_clean and s_clean not in self.config.ditoo_stock_tickers:
+                                self.config.ditoo_stock_tickers.append(s_clean)
+                                self.config.save()
+                                self.ditoo.update_config(self.config)
                     self._render_gui()
-                break
+                    return
+
+            # Crypto Checkboxes
+            for c_id, (cx1, cy1, cx2, cy2) in self.ditoo_crypto_bounds.items():
+                if cx1 <= canvas_x <= cx2 and cy1 <= canvas_y <= cy2:
+                    if c_id in self.config.ditoo_enabled_cryptos:
+                        if len(self.config.ditoo_enabled_cryptos) > 1 or self.config.ditoo_stock_tickers:
+                            self.config.ditoo_enabled_cryptos.remove(c_id)
+                    else:
+                        self.config.ditoo_enabled_cryptos.append(c_id)
+                    self.config.save()
+                    self.ditoo.update_config(self.config)
+                    self._render_gui()
+                    return
+
+            # Stock Ticker actions (up, down, delete)
+            for action, (sx1, sy1, sx2, sy2) in self.ditoo_stock_bounds.items():
+                if sx1 <= canvas_x <= sx2 and sy1 <= canvas_y <= sy2:
+                    act_type, idx_str = action.split("_", 1)
+                    idx = int(idx_str)
+                    tickers = self.config.ditoo_stock_tickers
+                    if act_type == "up" and idx > 0:
+                        tickers[idx - 1], tickers[idx] = tickers[idx], tickers[idx - 1]
+                    elif act_type == "down" and idx < len(tickers) - 1:
+                        tickers[idx + 1], tickers[idx] = tickers[idx], tickers[idx + 1]
+                    elif act_type == "del":
+                        if len(tickers) > 1 or self.config.ditoo_enabled_cryptos:
+                            tickers.pop(idx)
+                    self.config.save()
+                    self.ditoo.update_config(self.config)
+                    self._render_gui()
+                    return
+
+        # 6. Card clicked -> route to MiniToo
+        if self.config.target_device == "minitoo":
+            for p_id, (cx1, cy1, cx2, cy2) in self.card_bounds.items():
+                if cx1 <= canvas_x <= cx2 and cy1 <= canvas_y <= cy2:
+                    if self.config.enabled_cards.get(p_id, True):
+                        print(f"[APP] Card clicked: {p_id.upper()} -> Routing to MiniToo")
+                        self.minitoo.push_page(p_id)
+                        self._render_gui()
+                    break
 
     def _open_settings(self):
         SettingsDialog(self.root, self.config, on_save_callback=self._on_settings_saved)
@@ -271,6 +413,7 @@ class DesktopDashboardApp:
         self.autostart_enabled = WindowsAutostart.is_enabled()
         self.engine.update_config(new_config)
         self.minitoo.update_config(new_config)
+        self.ditoo.update_config(new_config)
         self._render_gui()
 
     def _on_close(self):
@@ -291,6 +434,7 @@ class DesktopDashboardApp:
                 pass
         self.engine.stop()
         self.minitoo.stop()
+        self.ditoo.stop()
         self.root.destroy()
         sys.exit(0)
 
@@ -302,13 +446,567 @@ class DesktopDashboardApp:
         self.card_bounds.clear()
         self.preset_bounds.clear()
         self.btn_bounds.clear()
+        self.device_tab_bounds.clear()
+        self.ditoo_btn_bounds.clear()
+        self.ditoo_crypto_bounds.clear()
+        self.ditoo_stock_bounds.clear()
 
-        # 1. Fixed Header Bar
+        # 1. Fixed Header Bar with Device Selector
         self._draw_header()
 
-        # 2. Section-Based Cards Layout
+        # 2. Main Content View based on Selected Device
         curr_y = HEADER_HEIGHT + 6
+        target = getattr(self.config, "target_device", "ditoo").lower()
 
+        if target == "ditoo":
+            curr_y = self._draw_ditoo_panel(curr_y)
+        elif target == "preview":
+            curr_y = self._draw_dual_preview_panel(curr_y)
+        else:
+            curr_y = self._draw_minitoo_sections(curr_y)
+
+        # 3. Footer Bar
+        self._draw_footer(curr_y)
+
+        # Update scrollregion
+        max_scroll_y = max(WINDOW_HEIGHT, curr_y + FOOTER_HEIGHT + 10)
+        self.canvas.configure(scrollregion=(0, 0, WINDOW_WIDTH, max_scroll_y))
+
+        # Schedule next periodic refresh
+        if hasattr(self, "_after_id") and self._after_id:
+            try:
+                self.root.after_cancel(self._after_id)
+            except Exception:
+                pass
+        self._after_id = self.root.after(250, self._render_gui)
+
+    def _draw_header(self):
+        target = getattr(self.config, "target_device", "ditoo").lower()
+
+        # Line 1: Title & System Controls
+        self.canvas.create_text(
+            GRID_MARGIN,
+            16,
+            text="AI DESK DASHBOARD",
+            font=("Consolas", 11, "bold"),
+            fill=C_ACTIVE_CYAN,
+            anchor="w",
+        )
+
+        # Device Connection Status Pill
+        if target == "ditoo":
+            conn = self.state.ditoo_connected
+            status_str = self.state.ditoo_status_text
+            pill_color = C_GREEN if conn else (C_AMBER if "RECONNECTING" in status_str else C_RED)
+            pill_bg = "#0D261B" if conn else ("#261D0D" if "RECONNECTING" in status_str else "#2A1111")
+            pill_border = "#1B4D36" if conn else ("#4D361B" if "RECONNECTING" in status_str else "#4D1B1B")
+        elif target == "preview":
+            conn = self.state.ditoo_connected or self.state.minitoo_connected
+            d_st = "DITOO ● " if self.state.ditoo_connected else "DITOO ○ "
+            m_st = "MINITOO ●" if self.state.minitoo_connected else "MINITOO ○"
+            status_str = f"DUAL: {d_st}| {m_st}"
+            pill_color = C_ACTIVE_CYAN if conn else C_AMBER
+            pill_bg = "#09222E"
+            pill_border = "#13495F"
+        else:
+            conn = self.state.minitoo_connected
+            status_str = self.state.minitoo_status_text
+            pill_color = C_GREEN if conn else C_AMBER
+            pill_bg = "#0D261B" if conn else "#261D0D"
+            pill_border = "#1B4D36" if conn else "#4D361B"
+
+        px1 = 175
+        py1 = 5
+        px2 = 430
+        py2 = 27
+        self.canvas.create_rectangle(px1, py1, px2, py2, fill=pill_bg, outline=pill_border, width=1)
+        self.canvas.create_oval(px1 + 8, py1 + 7, px1 + 14, py1 + 13, fill=pill_color, outline="")
+        self.canvas.create_text(
+            px1 + 20,
+            16,
+            text=status_str,
+            font=("Consolas", 7, "bold"),
+            fill=pill_color,
+            anchor="w",
+        )
+
+        # Autostart Button
+        btn_x1 = 438
+        btn_y1 = 5
+        btn_x2 = 538
+        btn_y2 = 27
+        auto_text = "AUTOSTART: ON" if self.autostart_enabled else "AUTOSTART: OFF"
+        auto_fg = C_GREEN if self.autostart_enabled else C_TEXT_MUTED
+        auto_bg = "#0E2419" if self.autostart_enabled else "#151B27"
+        auto_border = "#1E4733" if self.autostart_enabled else "#253047"
+        self.canvas.create_rectangle(btn_x1, btn_y1, btn_x2, btn_y2, fill=auto_bg, outline=auto_border, width=1)
+        self.canvas.create_text(
+            (btn_x1 + btn_x2) // 2,
+            16,
+            text=auto_text,
+            font=("Consolas", 7, "bold"),
+            fill=auto_fg,
+            anchor="center",
+        )
+        self.btn_bounds["autostart"] = (btn_x1, btn_y1, btn_x2, btn_y2)
+
+        # Settings Button
+        set_x1 = 544
+        set_y1 = 5
+        set_x2 = 630
+        set_y2 = 27
+        self.canvas.create_rectangle(set_x1, set_y1, set_x2, set_y2, fill="#131B2A", outline="#25354F", width=1)
+        self.canvas.create_text(
+            (set_x1 + set_x2) // 2,
+            16,
+            text="⚙ SETTINGS",
+            font=("Consolas", 7, "bold"),
+            fill=C_ACTIVE_CYAN,
+            anchor="center",
+        )
+        self.btn_bounds["settings"] = (set_x1, set_y1, set_x2, set_y2)
+
+        # Line 2: Prominent Display Device Selector Tabs
+        self.canvas.create_text(
+            GRID_MARGIN,
+            46,
+            text="DEVICE:",
+            font=("Consolas", 7, "bold"),
+            fill=C_TEXT_DIM,
+            anchor="w",
+        )
+
+        tabs = [
+            ("minitoo", "🖥 MiniToo", 90),
+            ("ditoo", "👾 Ditoo (16x16)", 125),
+            ("preview", "👁 Preview", 90),
+        ]
+        cur_tab_x = GRID_MARGIN + 52
+        for dev_key, dev_label, tab_w in tabs:
+            is_active = (target == dev_key)
+            t_bg = "#0B2638" if is_active else "#101622"
+            t_fg = C_ACTIVE_CYAN if is_active else C_TEXT_MUTED
+            t_border = C_ACTIVE_CYAN if is_active else "#1C2536"
+            tx1 = cur_tab_x
+            ty1 = 36
+            tx2 = tx1 + tab_w
+            ty2 = 56
+            self.canvas.create_rectangle(tx1, ty1, tx2, ty2, fill=t_bg, outline=t_border, width=1)
+            self.canvas.create_text(
+                (tx1 + tx2) // 2,
+                46,
+                text=dev_label,
+                font=("Consolas", 7, "bold"),
+                fill=t_fg,
+                anchor="center",
+            )
+            self.device_tab_bounds[dev_key] = (tx1, ty1, tx2, ty2)
+            cur_tab_x += tab_w + 6
+
+        # Line 2 Right Side: Context Action Buttons
+        if target == "minitoo":
+            self.canvas.create_text(cur_tab_x + 8, 46, text="PRESET:", font=("Consolas", 7, "bold"), fill=C_TEXT_DIM, anchor="w")
+            px = cur_tab_x + 58
+            for p_name in ALL_PRESETS:
+                is_active = (self.config.active_preset == p_name)
+                p_bg = "#0B2638" if is_active else "#101622"
+                p_fg = C_ACTIVE_CYAN if is_active else C_TEXT_MUTED
+                p_border = C_ACTIVE_CYAN if is_active else "#1C2536"
+                pw = 50
+                bx1, by1, bx2, by2 = px, 36, px + pw, 56
+                self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=p_bg, outline=p_border, width=1)
+                self.canvas.create_text((bx1 + bx2) // 2, 46, text=p_name, font=("Consolas", 7, "bold"), fill=p_fg, anchor="center")
+                self.preset_bounds[p_name] = (bx1, by1, bx2, by2)
+                px += pw + 4
+
+        elif target == "ditoo":
+            # Quick rotation playback buttons on header
+            px = 390
+            # Prev
+            self.canvas.create_rectangle(px, 36, px + 44, 56, fill="#121A28", outline="#202A3C")
+            self.canvas.create_text(px + 22, 46, text="◀ PREV", font=("Consolas", 7, "bold"), fill=C_TEXT_WHITE, anchor="center")
+            self.ditoo_btn_bounds["prev"] = (px, 36, px + 44, 56)
+            px += 48
+
+            # Pause / Resume
+            is_paused = self.config.ditoo_is_paused
+            pause_text = "▶ RESUME" if is_paused else "⏸ PAUSE"
+            pause_fg = C_AMBER if is_paused else C_GREEN
+            pause_bg = "#261D0D" if is_paused else "#0D261B"
+            pause_border = "#4D361B" if is_paused else "#1B4D36"
+            self.canvas.create_rectangle(px, 36, px + 68, 56, fill=pause_bg, outline=pause_border)
+            self.canvas.create_text(px + 34, 46, text=pause_text, font=("Consolas", 7, "bold"), fill=pause_fg, anchor="center")
+            self.ditoo_btn_bounds["pause"] = (px, 36, px + 68, 56)
+            px += 72
+
+            # Next
+            self.canvas.create_rectangle(px, 36, px + 44, 56, fill="#121A28", outline="#202A3C")
+            self.canvas.create_text(px + 22, 46, text="NEXT ▶", font=("Consolas", 7, "bold"), fill=C_TEXT_WHITE, anchor="center")
+            self.ditoo_btn_bounds["next"] = (px, 36, px + 44, 56)
+            px += 48
+
+            # Rotation toggle
+            rot_on = self.config.ditoo_auto_rotation
+            rot_text = "ROT: ON" if rot_on else "ROT: OFF"
+            rot_fg = C_GREEN if rot_on else C_TEXT_MUTED
+            self.canvas.create_rectangle(px, 36, px + 56, 56, fill="#121A28", outline="#202A3C")
+            self.canvas.create_text(px + 28, 46, text=rot_text, font=("Consolas", 7, "bold"), fill=rot_fg, anchor="center")
+            self.ditoo_btn_bounds["rot_toggle"] = (px, 36, px + 56, 56)
+
+        # Divider under header
+        self.canvas.create_line(0, HEADER_HEIGHT, WINDOW_WIDTH, HEADER_HEIGHT, fill="#151D2A", width=1)
+
+    def _draw_ditoo_panel(self, curr_y: int) -> int:
+        # 1. Hero Live Preview Card
+        c1_x1 = GRID_MARGIN
+        c1_y1 = curr_y
+        c1_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c1_y2 = c1_y1 + 180
+
+        self.canvas.create_rectangle(c1_x1, c1_y1, c1_x2, c1_y2, fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
+
+        # Nearest-Neighbor 160x160 Live Preview (Exact 16x16 transmitted frame)
+        prev_x = c1_x1 + 10
+        prev_y = c1_y1 + 10
+        active_img = self.state.ditoo_active_frame
+        if active_img is None:
+            active_img = Crypto16Renderer.render_icon_frame(self.state.ditoo_active_asset or "BTC")
+
+        scaled_img = active_img.resize((160, 160), Image.Resampling.NEAREST)
+        self._ditoo_photo = ImageTk.PhotoImage(scaled_img)
+        self.canvas.create_image(prev_x, prev_y, image=self._ditoo_photo, anchor="nw")
+
+        # Crisp border around 16x16 matrix
+        self.canvas.create_rectangle(prev_x - 1, prev_y - 1, prev_x + 160, prev_y + 160, outline="#2A384F", width=1)
+
+        # Right Side Information & Telemetry
+        info_x = prev_x + 172
+        # Title
+        self.canvas.create_text(info_x, c1_y1 + 18, text="DITOO 16x16 LIVE DISPLAY FEED", font=("Consolas", 10, "bold"), fill=C_ACTIVE_CYAN, anchor="w")
+
+        # Connection status badge
+        conn = self.state.ditoo_connected
+        st_text = self.state.ditoo_status_text
+        st_color = C_GREEN if conn else (C_AMBER if "RECONNECTING" in st_text else C_RED)
+        self.canvas.create_text(c1_x2 - 12, c1_y1 + 18, text=st_text, font=("Consolas", 7, "bold"), fill=st_color, anchor="e")
+
+        # Active Asset & Frame info
+        active_sym = self.state.ditoo_active_asset
+        frame_t = self.state.ditoo_active_frame_type
+        brand_c = CRYPTO_BRAND_COLORS.get(active_sym, BRAND_COLORS.get(active_sym, C_GOLD))
+        self.canvas.create_text(info_x, c1_y1 + 42, text="CURRENT ASSET:", font=("Consolas", 8), fill=C_TEXT_MUTED, anchor="w")
+        self.canvas.create_text(info_x + 95, c1_y1 + 42, text=f"[ {active_sym} ]", font=("Consolas", 10, "bold"), fill=brand_c, anchor="w")
+
+        self.canvas.create_text(info_x, c1_y1 + 64, text="FRAME TYPE:", font=("Consolas", 8), fill=C_TEXT_MUTED, anchor="w")
+        self.canvas.create_text(info_x + 95, c1_y1 + 64, text=f"[ {frame_t} ]", font=("Consolas", 9, "bold"), fill=C_BLUE, anchor="w")
+
+        # Telemetry & Timestamps
+        last_mkt = self.state.ditoo_last_market_update
+        mkt_str = f"{int(time.time() - last_mkt)}s ago" if last_mkt > 0 else "Live"
+        self.canvas.create_text(info_x, c1_y1 + 86, text="MARKET DATA:", font=("Consolas", 8), fill=C_TEXT_MUTED, anchor="w")
+        self.canvas.create_text(info_x + 95, c1_y1 + 86, text=f"{mkt_str} (Cached/Live)", font=("Consolas", 8, "bold"), fill=C_GREEN, anchor="w")
+
+        self.canvas.create_text(info_x, c1_y1 + 106, text="BLE ENDPOINT:", font=("Consolas", 8), fill=C_TEXT_MUTED, anchor="w")
+        self.canvas.create_text(info_x + 95, c1_y1 + 106, text="DitooPro-Light (BLE Data)", font=("Consolas", 8), fill=C_TEXT_WHITE, anchor="w")
+
+        self.canvas.create_text(info_x, c1_y1 + 124, text="WIN AUDIO:", font=("Consolas", 8), fill=C_TEXT_MUTED, anchor="w")
+        self.canvas.create_text(info_x + 95, c1_y1 + 124, text="UNTOUCHED (Isolated)", font=("Consolas", 8, "bold"), fill=C_GREEN, anchor="w")
+
+        # Brightness stepper row
+        b_val = self.config.ditoo_brightness
+        self.canvas.create_text(info_x, c1_y1 + 152, text="BRIGHTNESS:", font=("Consolas", 8, "bold"), fill=C_TEXT_MUTED, anchor="w")
+        # [-]
+        self.canvas.create_rectangle(info_x + 95, c1_y1 + 142, info_x + 115, c1_y1 + 162, fill="#161F2E", outline="#25354F")
+        self.canvas.create_text(info_x + 105, c1_y1 + 152, text="-", font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="center")
+        self.ditoo_btn_bounds["bright_down"] = (info_x + 95, c1_y1 + 142, info_x + 115, c1_y1 + 162)
+
+        self.canvas.create_text(info_x + 138, c1_y1 + 152, text=f"{b_val}%", font=("Consolas", 8, "bold"), fill=C_GOLD, anchor="center")
+
+        # [+]
+        self.canvas.create_rectangle(info_x + 160, c1_y1 + 142, info_x + 180, c1_y1 + 162, fill="#161F2E", outline="#25354F")
+        self.canvas.create_text(info_x + 170, c1_y1 + 152, text="+", font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="center")
+        self.ditoo_btn_bounds["bright_up"] = (info_x + 160, c1_y1 + 142, info_x + 180, c1_y1 + 162)
+
+        curr_y = c1_y2 + GAP
+
+        # 2. Crypto Rotation Card
+        c2_x1 = GRID_MARGIN
+        c2_y1 = curr_y
+        c2_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c2_y2 = c2_y1 + 76
+
+        self.canvas.create_rectangle(c2_x1, c2_y1, c2_x2, c2_y2, fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
+        # Header line
+        self.canvas.create_text(c2_x1 + 10, c2_y1 + 14, text="─── [ CRYPTO ASSETS ROTATION ]", font=("Consolas", 8, "bold"), fill=C_GOLD, anchor="w")
+
+        cr_on = self.config.ditoo_enabled_crypto_page
+        cr_btn_text = "CRYPTO: ENABLED" if cr_on else "CRYPTO: DISABLED"
+        cr_btn_fg = C_GREEN if cr_on else C_TEXT_MUTED
+        cr_btn_bg = "#0E2419" if cr_on else "#151B27"
+        self.canvas.create_rectangle(c2_x2 - 125, c2_y1 + 5, c2_x2 - 10, c2_y1 + 23, fill=cr_btn_bg, outline="#203040")
+        self.canvas.create_text(c2_x2 - 67, c2_y1 + 14, text=cr_btn_text, font=("Consolas", 7, "bold"), fill=cr_btn_fg, anchor="center")
+        self.ditoo_btn_bounds["crypto_master"] = (c2_x2 - 125, c2_y1 + 5, c2_x2 - 10, c2_y1 + 23)
+
+        # 5 individual coin toggle buttons
+        coins = ["btc", "eth", "sol", "doge", "pepe"]
+        btn_w = 116
+        bx_start = c2_x1 + 10
+        for i, coin in enumerate(coins):
+            bx1 = bx_start + i * (btn_w + 8)
+            by1 = c2_y1 + 30
+            bx2 = bx1 + btn_w
+            by2 = by1 + 36
+
+            is_coin_on = (coin in self.config.ditoo_enabled_cryptos)
+            c_bg = "#0C231A" if is_coin_on else "#0E131D"
+            c_border = "#2E8B57" if is_coin_on else "#1A2230"
+
+            self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=c_bg, outline=c_border, width=1)
+            mark = "[✓]" if is_coin_on else "[ ]"
+            coin_color = CRYPTO_BRAND_COLORS.get(coin.upper(), C_WHITE) if is_coin_on else C_TEXT_DIM
+            self.canvas.create_text(bx1 + 8, by1 + 12, text=f"{mark} {coin.upper()}", font=("Consolas", 8, "bold"), fill=coin_color, anchor="w")
+
+            # Show price / delta
+            asset_data = self.ditoo._crypto_data.get(coin)
+            if asset_data:
+                p_str = format_abbreviated_price(asset_data.price)
+                d_str, d_col = format_delta_pct(asset_data.change_24h)
+                self.canvas.create_text(bx1 + 8, by1 + 25, text=f"{p_str} {d_str}", font=("Consolas", 7), fill=d_col if is_coin_on else C_TEXT_DIM, anchor="w")
+            else:
+                self.canvas.create_text(bx1 + 8, by1 + 25, text="Loading...", font=("Consolas", 7), fill=C_TEXT_DIM, anchor="w")
+
+            self.ditoo_crypto_bounds[coin] = (bx1, by1, bx2, by2)
+
+        curr_y = c2_y2 + GAP
+
+        # 3. Stock Tickers Card
+        tickers = self.config.ditoo_stock_tickers
+        c3_h = 40 + max(1, len(tickers)) * 26 + 10
+        c3_x1 = GRID_MARGIN
+        c3_y1 = curr_y
+        c3_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c3_y2 = c3_y1 + c3_h
+
+        self.canvas.create_rectangle(c3_x1, c3_y1, c3_x2, c3_y2, fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
+        self.canvas.create_text(c3_x1 + 10, c3_y1 + 16, text="─── [ US STOCK TICKERS ROTATION ]", font=("Consolas", 8, "bold"), fill=C_ACTIVE_CYAN, anchor="w")
+
+        # Master stock toggle
+        st_on = self.config.ditoo_enabled_stock_page
+        st_btn_text = "STOCKS: ENABLED" if st_on else "STOCKS: DISABLED"
+        st_btn_fg = C_GREEN if st_on else C_TEXT_MUTED
+        st_btn_bg = "#0E2419" if st_on else "#151B27"
+        self.canvas.create_rectangle(c3_x2 - 225, c3_y1 + 6, c3_x2 - 110, c3_y1 + 24, fill=st_btn_bg, outline="#203040")
+        self.canvas.create_text(c3_x2 - 167, c3_y1 + 15, text=st_btn_text, font=("Consolas", 7, "bold"), fill=st_btn_fg, anchor="center")
+        self.ditoo_btn_bounds["stock_master"] = (c3_x2 - 225, c3_y1 + 6, c3_x2 - 110, c3_y1 + 24)
+
+        # [+ ADD TICKER] button
+        self.canvas.create_rectangle(c3_x2 - 100, c3_y1 + 6, c3_x2 - 10, c3_y1 + 24, fill="#132438", outline=C_ACTIVE_CYAN)
+        self.canvas.create_text(c3_x2 - 55, c3_y1 + 15, text="+ ADD TICKER", font=("Consolas", 7, "bold"), fill=C_ACTIVE_CYAN, anchor="center")
+        self.ditoo_btn_bounds["add_stock"] = (c3_x2 - 100, c3_y1 + 6, c3_x2 - 10, c3_y1 + 24)
+
+        # Render each configured stock ticker row
+        for idx, sym in enumerate(tickers):
+            ry = c3_y1 + 36 + idx * 26
+            row_bg = "#141A28" if idx % 2 == 0 else "#0F1420"
+            self.canvas.create_rectangle(c3_x1 + 10, ry, c3_x2 - 10, ry + 22, fill=row_bg, outline="#1B2434", width=1)
+
+            # Order badge
+            self.canvas.create_text(c3_x1 + 20, ry + 11, text=f"#{idx + 1}", font=("Consolas", 8, "bold"), fill=C_TEXT_DIM, anchor="w")
+
+            # Symbol & Brand
+            sym_col = BRAND_COLORS.get(sym, C_ACTIVE_CYAN)
+            self.canvas.create_text(c3_x1 + 55, ry + 11, text=sym, font=("Consolas", 9, "bold"), fill=sym_col, anchor="w")
+
+            # Price & Delta from live cache
+            sq = self.ditoo._stock_data.get(sym)
+            if sq:
+                price_str = f"${sq.price:.2f}"
+                sign = "+" if sq.change_pct >= 0 else ""
+                delta_str = f"{sign}{sq.change_pct:.1f}%"
+                delta_col = C_GREEN if sq.change_pct >= 0 else C_RED
+                self.canvas.create_text(c3_x1 + 120, ry + 11, text=price_str, font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="w")
+                self.canvas.create_text(c3_x1 + 180, ry + 11, text=delta_str, font=("Consolas", 8, "bold"), fill=delta_col, anchor="w")
+            else:
+                self.canvas.create_text(c3_x1 + 120, ry + 11, text="Polling...", font=("Consolas", 8), fill=C_TEXT_DIM, anchor="w")
+
+            # Action buttons on right: [▲] [▼] [✖]
+            ax = c3_x2 - 95
+            # Up button
+            self.canvas.create_rectangle(ax, ry + 2, ax + 22, ry + 20, fill="#1B2638", outline="#293950")
+            self.canvas.create_text(ax + 11, ry + 11, text="▲", font=("Consolas", 7, "bold"), fill=C_TEXT_WHITE, anchor="center")
+            self.ditoo_stock_bounds[f"up_{idx}"] = (ax, ry + 2, ax + 22, ry + 20)
+
+            # Down button
+            self.canvas.create_rectangle(ax + 26, ry + 2, ax + 48, ry + 20, fill="#1B2638", outline="#293950")
+            self.canvas.create_text(ax + 37, ry + 11, text="▼", font=("Consolas", 7, "bold"), fill=C_TEXT_WHITE, anchor="center")
+            self.ditoo_stock_bounds[f"down_{idx}"] = (ax + 26, ry + 2, ax + 48, ry + 20)
+
+            # Delete button
+            self.canvas.create_rectangle(ax + 54, ry + 2, ax + 76, ry + 20, fill="#2D1414", outline="#502020")
+            self.canvas.create_text(ax + 65, ry + 11, text="✖", font=("Consolas", 7, "bold"), fill=C_RED, anchor="center")
+            self.ditoo_stock_bounds[f"del_{idx}"] = (ax + 54, ry + 2, ax + 76, ry + 20)
+
+        curr_y = c3_y2 + GAP
+
+        # 4. Rotation Timing & Dwell Settings Card
+        c4_x1 = GRID_MARGIN
+        c4_y1 = curr_y
+        c4_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c4_y2 = c4_y1 + 70
+
+        self.canvas.create_rectangle(c4_x1, c4_y1, c4_x2, c4_y2, fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
+        self.canvas.create_text(c4_x1 + 10, c4_y1 + 14, text="─── [ ROTATION CADENCE & FRAME DWELL ]", font=("Consolas", 8, "bold"), fill=C_CORAL, anchor="w")
+
+        # Steppers row
+        dw_logo = self.config.ditoo_frame_logo_dwell
+        dw_price = self.config.ditoo_frame_price_dwell
+        dw_change = self.config.ditoo_frame_change_dwell
+
+        # Logo dwell
+        lx = c4_x1 + 12
+        self.canvas.create_text(lx, c4_y1 + 34, text="LOGO DWELL:", font=("Consolas", 7, "bold"), fill=C_TEXT_MUTED, anchor="w")
+        self.canvas.create_rectangle(lx + 80, c4_y1 + 24, lx + 98, c4_y1 + 42, fill="#161F2E", outline="#25354F")
+        self.canvas.create_text(lx + 89, c4_y1 + 33, text="-", font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="center")
+        self.ditoo_btn_bounds["dwell_logo_down"] = (lx + 80, c4_y1 + 24, lx + 98, c4_y1 + 42)
+
+        self.canvas.create_text(lx + 116, c4_y1 + 33, text=f"{dw_logo:.1f}s", font=("Consolas", 8, "bold"), fill=C_ACTIVE_CYAN, anchor="center")
+
+        self.canvas.create_rectangle(lx + 134, c4_y1 + 24, lx + 152, c4_y1 + 42, fill="#161F2E", outline="#25354F")
+        self.canvas.create_text(lx + 143, c4_y1 + 33, text="+", font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="center")
+        self.ditoo_btn_bounds["dwell_logo_up"] = (lx + 134, c4_y1 + 24, lx + 152, c4_y1 + 42)
+
+        # Price dwell
+        px = c4_x1 + 180
+        self.canvas.create_text(px, c4_y1 + 34, text="PRICE DWELL:", font=("Consolas", 7, "bold"), fill=C_TEXT_MUTED, anchor="w")
+        self.canvas.create_rectangle(px + 85, c4_y1 + 24, px + 103, c4_y1 + 42, fill="#161F2E", outline="#25354F")
+        self.canvas.create_text(px + 94, c4_y1 + 33, text="-", font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="center")
+        self.ditoo_btn_bounds["dwell_price_down"] = (px + 85, c4_y1 + 24, px + 103, c4_y1 + 42)
+
+        self.canvas.create_text(px + 121, c4_y1 + 33, text=f"{dw_price:.1f}s", font=("Consolas", 8, "bold"), fill=C_ACTIVE_CYAN, anchor="center")
+
+        self.canvas.create_rectangle(px + 139, c4_y1 + 24, px + 157, c4_y1 + 42, fill="#161F2E", outline="#25354F")
+        self.canvas.create_text(px + 148, c4_y1 + 33, text="+", font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="center")
+        self.ditoo_btn_bounds["dwell_price_up"] = (px + 139, c4_y1 + 24, px + 157, c4_y1 + 42)
+
+        # Change dwell
+        cx = c4_x1 + 355
+        self.canvas.create_text(cx, c4_y1 + 34, text="CHANGE DWELL:", font=("Consolas", 7, "bold"), fill=C_TEXT_MUTED, anchor="w")
+        self.canvas.create_rectangle(cx + 90, c4_y1 + 24, cx + 108, c4_y1 + 42, fill="#161F2E", outline="#25354F")
+        self.canvas.create_text(cx + 99, c4_y1 + 33, text="-", font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="center")
+        self.ditoo_btn_bounds["dwell_change_down"] = (cx + 90, c4_y1 + 24, cx + 108, c4_y1 + 42)
+
+        self.canvas.create_text(cx + 126, c4_y1 + 33, text=f"{dw_change:.1f}s", font=("Consolas", 8, "bold"), fill=C_ACTIVE_CYAN, anchor="center")
+
+        self.canvas.create_rectangle(cx + 144, c4_y1 + 24, cx + 162, c4_y1 + 42, fill="#161F2E", outline="#25354F")
+        self.canvas.create_text(cx + 153, c4_y1 + 33, text="+", font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="center")
+        self.ditoo_btn_bounds["dwell_change_up"] = (cx + 144, c4_y1 + 24, cx + 162, c4_y1 + 42)
+
+        # Rotation summary
+        dwell_per_asset = dw_logo + dw_price + dw_change
+        num_assets = len(self.ditoo._get_active_assets())
+        tot_cycle = dwell_per_asset * num_assets
+        self.canvas.create_text(
+            c4_x1 + 12,
+            c4_y1 + 56,
+            text=f"CADENCE: {dwell_per_asset:.1f}s/asset  |  COMPLETE ROTATION CYCLE: {tot_cycle:.1f}s ({num_assets} active assets)",
+            font=("Consolas", 7, "bold"),
+            fill=C_TEXT_MUTED,
+            anchor="w",
+        )
+
+        curr_y = c4_y2 + GAP
+
+        # 5. Device Architecture & Audio Isolation Note
+        c5_x1 = GRID_MARGIN
+        c5_y1 = curr_y
+        c5_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c5_y2 = c5_y1 + 46
+
+        self.canvas.create_rectangle(c5_x1, c5_y1, c5_x2, c5_y2, fill="#0A0F18", outline="#182232", width=1)
+        self.canvas.create_text(
+            c5_x1 + 10,
+            c5_y1 + 14,
+            text="DEVICE: DitooPro-Light (BLE GATT UART)  |  AUDIO: Isolated (DitooPro-Audio excluded)",
+            font=("Consolas", 7, "bold"),
+            fill=C_GREEN,
+            anchor="w",
+        )
+        self.canvas.create_text(
+            c5_x1 + 10,
+            c5_y1 + 30,
+            text="PHYSICAL CONTROLS: Managed internally by Ditoo MCU firmware (No BLE key events)",
+            font=("Consolas", 7),
+            fill=C_TEXT_DIM,
+            anchor="w",
+        )
+
+        return c5_y2 + GAP
+
+    def _draw_dual_preview_panel(self, curr_y: int) -> int:
+        c_x1 = GRID_MARGIN
+        c_y1 = curr_y
+        c_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c_y2 = c_y1 + 260
+
+        self.canvas.create_rectangle(c_x1, c_y1, c_x2, c_y2, fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
+
+        # Left: MiniToo 160x128 Preview
+        mx = c_x1 + 20
+        my = c_y1 + 30
+        self.canvas.create_text(mx, c_y1 + 16, text="MINITOO DISPLAY (160x128 LCD)", font=("Consolas", 9, "bold"), fill=C_ACTIVE_CYAN, anchor="w")
+
+        mini_img = self.minitoo._render_active_frame()
+        if mini_img:
+            m_scaled = mini_img.resize((192, 154), Image.Resampling.NEAREST)
+            self._minitoo_photo = ImageTk.PhotoImage(m_scaled)
+            self.canvas.create_image(mx, my, image=self._minitoo_photo, anchor="nw")
+            self.canvas.create_rectangle(mx - 1, my - 1, mx + 192, my + 154, outline="#2A384F", width=1)
+        else:
+            self.canvas.create_rectangle(mx, my, mx + 192, my + 154, fill="#0B0F17", outline="#1F2633")
+            self.canvas.create_text(mx + 96, my + 77, text="MiniToo Standby", font=("Consolas", 8), fill=C_TEXT_DIM, anchor="center")
+
+        p_name = self.state.minitoo_active_page.upper()
+        self.canvas.create_text(mx, my + 164, text=f"ACTIVE PAGE: [ {p_name} ]", font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="w")
+        m_conn = "CONNECTED" if self.state.minitoo_connected else "NOT FOUND"
+        m_col = C_GREEN if self.state.minitoo_connected else C_AMBER
+        self.canvas.create_text(mx, my + 178, text=f"PORT: {self.config.minitoo_port} ({m_conn})", font=("Consolas", 7), fill=m_col, anchor="w")
+
+        # Right: Ditoo 16x16 Preview
+        dx = c_x1 + 330
+        dy = c_y1 + 30
+        self.canvas.create_text(dx, c_y1 + 16, text="DITOO DISPLAY (16x16 RGB LED MATRIX)", font=("Consolas", 9, "bold"), fill=C_GOLD, anchor="w")
+
+        active_img = self.state.ditoo_active_frame
+        if active_img is None:
+            active_img = Crypto16Renderer.render_icon_frame(self.state.ditoo_active_asset or "BTC")
+
+        d_scaled = active_img.resize((154, 154), Image.Resampling.NEAREST)
+        self._ditoo_photo = ImageTk.PhotoImage(d_scaled)
+        self.canvas.create_image(dx, dy, image=self._ditoo_photo, anchor="nw")
+        self.canvas.create_rectangle(dx - 1, dy - 1, dx + 154, dy + 154, outline="#2A384F", width=1)
+
+        d_asset = self.state.ditoo_active_asset
+        d_frame = self.state.ditoo_active_frame_type
+        self.canvas.create_text(dx, dy + 164, text=f"ASSET: [ {d_asset} ] - {d_frame}", font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="w")
+        d_conn = "CONNECTED" if self.state.ditoo_connected else "RECONNECTING"
+        d_col = C_GREEN if self.state.ditoo_connected else C_AMBER
+        self.canvas.create_text(dx, dy + 178, text=f"BLE: {self.config.ditoo_mac} ({d_conn})", font=("Consolas", 7), fill=d_col, anchor="w")
+
+        # Telemetry Bar below
+        ty = c_y1 + 220
+        self.canvas.create_line(c_x1 + 10, ty, c_x2 - 10, ty, fill="#1A2434")
+        self.canvas.create_text(
+            c_x1 + 20,
+            ty + 18,
+            text=f"MINITOO CADENCE: {int(self.config.rotation_interval)}s  |  DITOO DWELL: {self.config.ditoo_frame_logo_dwell:.1f}s logo / {self.config.ditoo_frame_price_dwell:.1f}s price / {self.config.ditoo_frame_change_dwell:.1f}s delta",
+            font=("Consolas", 7, "bold"),
+            fill=C_TEXT_MUTED,
+            anchor="w",
+        )
+
+        return c_y2 + GAP
+
+    def _draw_minitoo_sections(self, curr_y: int) -> int:
         for sec_id in self.config.sections_order:
             if not self.config.enabled_sections.get(sec_id, True):
                 continue
@@ -387,139 +1085,29 @@ class DesktopDashboardApp:
             total_rows = (len(cards) + 2) // 3
             curr_y += total_rows * (CARD_HEIGHT + GAP) + 4
 
-        # 3. Footer Bar
-        self._draw_footer(curr_y)
-
-        # Update scrollregion
-        max_scroll_y = max(WINDOW_HEIGHT, curr_y + FOOTER_HEIGHT + 10)
-        self.canvas.configure(scrollregion=(0, 0, WINDOW_WIDTH, max_scroll_y))
-
-        # Schedule next periodic refresh
-        if hasattr(self, "_after_id") and self._after_id:
-            try:
-                self.root.after_cancel(self._after_id)
-            except Exception:
-                pass
-        self._after_id = self.root.after(250, self._render_gui)
-
-    def _draw_header(self):
-        # Line 1: Title & System Controls
-        self.canvas.create_text(
-            GRID_MARGIN,
-            16,
-            text="AI DESK DASHBOARD",
-            font=("Consolas", 11, "bold"),
-            fill=C_ACTIVE_CYAN,
-            anchor="w",
-        )
-
-        # MiniToo Connection Status Pill
-        conn = self.state.minitoo_connected
-        status_str = self.state.minitoo_status_text
-        pill_color = C_GREEN if conn else C_AMBER
-        pill_bg = "#0D261B" if conn else "#261D0D"
-        pill_border = "#1B4D36" if conn else "#4D361B"
-
-        px1 = 180
-        py1 = 5
-        px2 = 430
-        py2 = 27
-        self.canvas.create_rectangle(px1, py1, px2, py2, fill=pill_bg, outline=pill_border, width=1)
-        self.canvas.create_oval(px1 + 8, py1 + 7, px1 + 14, py1 + 13, fill=pill_color, outline="")
-        self.canvas.create_text(
-            px1 + 20,
-            16,
-            text=status_str,
-            font=("Consolas", 7, "bold"),
-            fill=pill_color,
-            anchor="w",
-        )
-
-        # Autostart Button
-        btn_x1 = 438
-        btn_y1 = 5
-        btn_x2 = 538
-        btn_y2 = 27
-        auto_text = "AUTOSTART: ON" if self.autostart_enabled else "AUTOSTART: OFF"
-        auto_fg = C_GREEN if self.autostart_enabled else C_TEXT_MUTED
-        auto_bg = "#0E2419" if self.autostart_enabled else "#151B27"
-        auto_border = "#1E4733" if self.autostart_enabled else "#253047"
-        self.canvas.create_rectangle(btn_x1, btn_y1, btn_x2, btn_y2, fill=auto_bg, outline=auto_border, width=1)
-        self.canvas.create_text(
-            (btn_x1 + btn_x2) // 2,
-            16,
-            text=auto_text,
-            font=("Consolas", 7, "bold"),
-            fill=auto_fg,
-            anchor="center",
-        )
-        self.btn_bounds["autostart"] = (btn_x1, btn_y1, btn_x2, btn_y2)
-
-        # Settings Button
-        set_x1 = 544
-        set_y1 = 5
-        set_x2 = 630
-        set_y2 = 27
-        self.canvas.create_rectangle(set_x1, set_y1, set_x2, set_y2, fill="#131B2A", outline="#25354F", width=1)
-        self.canvas.create_text(
-            (set_x1 + set_x2) // 2,
-            16,
-            text="⚙ SETTINGS",
-            font=("Consolas", 7, "bold"),
-            fill=C_ACTIVE_CYAN,
-            anchor="center",
-        )
-        self.btn_bounds["settings"] = (set_x1, set_y1, set_x2, set_y2)
-
-        # Line 2: Presets Toolbar
-        self.canvas.create_text(
-            GRID_MARGIN,
-            46,
-            text="PRESETS:",
-            font=("Consolas", 7, "bold"),
-            fill=C_TEXT_DIM,
-            anchor="w",
-        )
-
-        preset_x = GRID_MARGIN + 62
-        for p_name in ALL_PRESETS:
-            is_active = (self.config.active_preset == p_name)
-            p_bg = "#0B2638" if is_active else "#101622"
-            p_fg = C_ACTIVE_CYAN if is_active else C_TEXT_MUTED
-            p_border = C_ACTIVE_CYAN if is_active else "#1C2536"
-            pw = 76
-            ph = 20
-
-            bx1 = preset_x
-            by1 = 36
-            bx2 = bx1 + pw
-            by2 = by1 + ph
-            self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=p_bg, outline=p_border, width=1)
-            self.canvas.create_text(
-                (bx1 + bx2) // 2,
-                46,
-                text=f"[ {p_name} ]",
-                font=("Consolas", 7, "bold"),
-                fill=p_fg,
-                anchor="center",
-            )
-            self.preset_bounds[p_name] = (bx1, by1, bx2, by2)
-            preset_x += pw + 6
-
-        # Divider under header
-        self.canvas.create_line(0, HEADER_HEIGHT, WINDOW_WIDTH, HEADER_HEIGHT, fill="#151D2A", width=1)
+        return curr_y
 
     def _draw_footer(self, curr_y: int):
         fy = curr_y + 12
-        active_p = self.state.minitoo_active_page.upper()
-        cycle_str = " | AUTO-CYCLE: ON" if self.config.auto_cycle else ""
-
+        target = getattr(self.config, "target_device", "ditoo").upper()
         self.canvas.create_line(0, fy - 6, WINDOW_WIDTH, fy - 6, fill="#151D2A", width=1)
+
+        if target == "DITOO":
+            active_a = self.state.ditoo_active_asset
+            active_f = self.state.ditoo_active_frame_type
+            rot_str = " | AUTO-ROTATION: ON" if self.config.ditoo_auto_rotation else " | ROTATION: PAUSED"
+            foot_text = f"TARGET: [ DITOO 16x16 ]  |  ACTIVE ASSET: [ {active_a} ] ({active_f}){rot_str}"
+        elif target == "PREVIEW":
+            foot_text = "TARGET: [ DUAL PREVIEW ]  |  MINITOO (160x128) + DITOO (16x16)"
+        else:
+            active_p = self.state.minitoo_active_page.upper()
+            cycle_str = " | AUTO-CYCLE: ON" if self.config.auto_cycle else ""
+            foot_text = f"TARGET: [ MINITOO ]  |  ACTIVE PAGE: [ {active_p} ]{cycle_str}"
 
         self.canvas.create_text(
             GRID_MARGIN,
             fy + 4,
-            text=f"ACTIVE ON MINITOO: [ {active_p} ]{cycle_str}",
+            text=foot_text,
             font=("Consolas", 8, "bold"),
             fill=C_ACTIVE_CYAN,
             anchor="w",
@@ -528,7 +1116,7 @@ class DesktopDashboardApp:
         self.canvas.create_text(
             WINDOW_WIDTH - GRID_MARGIN,
             fy + 4,
-            text="CLICK CARD TO ROUTE TO MINITOO",
+            text="DEVICE SELECTOR AT TOP",
             font=("Consolas", 7),
             fill=C_TEXT_DIM,
             anchor="e",

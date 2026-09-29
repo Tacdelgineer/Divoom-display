@@ -194,6 +194,79 @@ class YahooFinanceMarketDataProvider(BaseMarketDataProvider):
 
         return []
 
+    def get_quotes_for_symbols(self, symbols: List[str]) -> Dict[str, StockQuote]:
+        """Fetch quotes for specified list of tickers with caching and network error resilience."""
+        if not symbols:
+            return {}
+
+        now = time.time()
+        cache = self._read_cache()
+        cached_quotes: Dict[str, StockQuote] = {}
+        if cache and "quotes" in cache:
+            for q in cache.get("quotes", []):
+                sym = q.get("symbol", "").upper()
+                cached_quotes[sym] = StockQuote(**q)
+
+        # If cache is fresh (< 60s) and covers all symbols, return from cache
+        if cache and (now - cache.get("timestamp", 0) < 60.0):
+            all_cached = all(s.upper() in cached_quotes for s in symbols)
+            if all_cached:
+                return {s.upper(): cached_quotes[s.upper()] for s in symbols if s.upper() in cached_quotes}
+
+        # Otherwise fetch from Yahoo Finance crumb session
+        crumb = self._get_crumb()
+        fetched_quotes: Dict[str, StockQuote] = {}
+
+        if crumb:
+            try:
+                symbols_clean = [s.upper().strip() for s in symbols if s.strip()]
+                symbols_str = ",".join(symbols_clean)
+                url = f"https://query2.finance.yahoo.com/v7/finance/quote?symbols={symbols_str}&crumb={crumb}"
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                )
+                with self._opener.open(req, timeout=5.0) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+                    results = payload.get("quoteResponse", {}).get("result", [])
+                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S")
+
+                    for item in results:
+                        sym = item.get("symbol", "").upper()
+                        name = item.get("shortName") or item.get("longName") or sym
+                        price = float(item.get("regularMarketPrice") or 0.0)
+                        high = float(item.get("regularMarketDayHigh") or price)
+                        low = float(item.get("regularMarketDayLow") or price)
+                        prev_close = float(item.get("regularMarketPreviousClose") or price)
+                        change_pct = float(item.get("regularMarketChangePercent") or 0.0)
+                        mkt_state = item.get("marketState", "REGULAR")
+                        vol = calculate_volatility(high, low, prev_close)
+
+                        sq = StockQuote(
+                            symbol=sym,
+                            name=name,
+                            price=price,
+                            change_pct=change_pct,
+                            volatility_pct=vol,
+                            high=high,
+                            low=low,
+                            previous_close=prev_close,
+                            market_state=mkt_state,
+                            source="YahooFinance",
+                            fetched_at=ts_str,
+                        )
+                        fetched_quotes[sym] = sq
+                        cached_quotes[sym] = sq
+
+                    # Update persistent cache with merged quotes
+                    self._write_cache(list(cached_quotes.values()))
+                    return {s.upper(): fetched_quotes[s.upper()] for s in symbols if s.upper() in fetched_quotes}
+            except Exception as e:
+                print(f"[MARKET] Error fetching quotes for {symbols}: {e}")
+
+        # Graceful fallback: return whatever we have in cache
+        return {s.upper(): cached_quotes[s.upper()] for s in symbols if s.upper() in cached_quotes}
+
 
 class FinnhubMarketDataProvider(BaseMarketDataProvider):
     """
@@ -209,6 +282,9 @@ class FinnhubMarketDataProvider(BaseMarketDataProvider):
         # Implementation for Finnhub quote endpoints
         # Falls back to YahooFinance if rate limit hit
         return YahooFinanceMarketDataProvider().get_top_volatile_stocks(count)
+
+    def get_quotes_for_symbols(self, symbols: List[str]) -> Dict[str, StockQuote]:
+        return YahooFinanceMarketDataProvider().get_quotes_for_symbols(symbols)
 
 
 def get_market_data_provider() -> BaseMarketDataProvider:

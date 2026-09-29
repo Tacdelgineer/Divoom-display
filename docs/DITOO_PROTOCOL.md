@@ -101,19 +101,50 @@ The proof-of-life sequence validates full end-to-end transport:
 
 ---
 
-## 7. Controls & Physical Input Events
+## 7. Controls & Physical Input Events Investigation
 
-- Physical controls on the Ditoo include:
-  - Mechanical keys (Cursor, Enter)
-  - Vintage pull lever
-  - Volume knob / side buttons
-- Microcontroller firmware handles audio volume and internal menu routing locally.
-- When connected via BLE, unsolicited packets are suppressed unless explicitly polled or unlocked via flow control registers.
+- **Physical Controls on Hardware:**
+  - Mechanical clicky keyboard (Left, Right, Enter, Menu, Up, Down)
+  - Vintage pull lever / joystick
+  - Side power button & volume buttons
+- **GATT Notification Audit:**
+  - An active hardware audit was conducted using `tools/test_ditoo_controls.py` by subscribing to notifications on the BLE Transparent UART RX characteristic (`49535343-1e4d-4bd9-ba61-23c647249616`) on physical hardware (`B1:21:81:5B:E3:16`).
+  - Key presses and lever actions were executed while monitoring the notification stream.
+- **Finding:**
+  - **Zero notification packets** are emitted over BLE UART during physical keyboard or lever events.
+  - The internal Ditoo MCU firmware routes mechanical keyboard and lever inputs exclusively to onboard applications (e.g. Pixel Games, Alarms, Voice Memos, Clock face) and local volume control. The standard pixel-streaming BLE firmware does not export raw key/joystick HID events over GATT.
+  - Consequently, playlist navigation (Previous / Next / Pause / Resume) is controlled directly from the Desktop Dashboard UI.
 
 ---
 
-## 8. Power Loss & Automatic Recovery
+## 8. Display Brightness Control
 
-- The driver maintains last known rendered frame buffers.
-- When power is lost or device goes out of range, the background runner applies exponential backoff reconnection (`connect_ble`).
-- Upon connection re-establishment, the active ticker/state is immediately resent to restore display state without manual intervention.
+- **Command `0x74` (Set Brightness):**
+  - Payload: `[Brightness 1B]` where Brightness is an integer from `0` to `100` (`0x00` - `0x64`).
+  - Framing: `[0x01, 0x04, 0x00, 0x74, Brightness, CRC_L, CRC_H, 0x02]`.
+  - Effect: Instantly adjusts LED panel illumination across all 256 RGB pixels without interrupting or invalidating active frame buffers.
+
+---
+
+## 9. Audio Isolation Guarantee
+
+- The application communicates **exclusively** with the Bluetooth Low Energy endpoint:
+  - Advertised name: `DitooPro-Light`
+  - MAC address: `B1:21:81:5B:E3:16`
+  - Service: ISSC Transparent UART (`49535343-fe7d-4ae5-8fa9-9fafd205e455`)
+- The Bluetooth Classic audio endpoint `DitooPro-Audio` is **never** accessed, selected, or routed. Windows Default Audio Device settings and routing remain 100% untouched.
+
+---
+
+## 10. Power Loss, Auto-Reconnect & Offline Resilience
+
+- **Connection Lifecycle:**
+  - `DitooController` maintains an autonomous async background engine.
+  - On startup or connection drop, the controller attempts reconnect to `DitooPro-Light` with a 3-second retry backoff.
+  - If MAC address changes, an automatic BLE scanner fallback identifies `DitooPro-Light` by name.
+  - Upon reconnection, brightness and active animation sequence resume automatically.
+- **Data Caching:**
+  - Market data for Cryptos (CoinGecko) and Stocks (Yahoo Finance) is polled independently every 35 seconds.
+  - Last good quotes are persistently cached locally.
+  - Network timeouts, rate-limits, or offline states never blank the display.
+

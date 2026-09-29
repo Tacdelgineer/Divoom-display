@@ -132,14 +132,21 @@ class DashboardConfig:
     ])
 
     # Ditoo 16x16 Hardware Display Configuration
-    target_device: str = "minitoo"  # "minitoo" or "ditoo"
+    target_device: str = "ditoo"  # "minitoo", "ditoo", or "preview"
     ditoo_mac: str = "B1:21:81:5B:E3:16"
     ditoo_port: str = "AUTO"
-    ditoo_enabled_btc: bool = True
-    ditoo_enabled_stocks: bool = True
+    ditoo_auto_connect: bool = True
+    ditoo_auto_rotation: bool = True
+    ditoo_is_paused: bool = False
+    ditoo_enabled_crypto_page: bool = True
+    ditoo_enabled_stock_page: bool = True
+    ditoo_enabled_cryptos: List[str] = field(default_factory=lambda: ["btc", "eth", "sol", "doge", "pepe"])
     ditoo_stock_tickers: List[str] = field(default_factory=lambda: ["NVDA", "TSLA", "AAPL", "MSFT", "META"])
-    ditoo_rotation_interval: float = 3.0
-    ditoo_layout_mode: str = "cycle"  # "cycle", "split", "scroll"
+    ditoo_frame_logo_dwell: float = 1.0    # Seconds for ticker/logo frame
+    ditoo_frame_price_dwell: float = 2.0   # Seconds for price frame
+    ditoo_frame_change_dwell: float = 2.0  # Seconds for change % frame
+    ditoo_brightness: int = 100            # Display brightness (0-100)
+    ditoo_layout_mode: str = "cycle"       # "cycle", "split", "scroll"
 
     def validate(self) -> None:
         """Sanitize and ensure lists contain valid items."""
@@ -299,6 +306,21 @@ class DashboardConfig:
                 {"id": "personal", "user_label": "Personal", "config_dir": os.path.expanduser("~/.claude")},
                 {"id": "secondary", "user_label": "Secondary", "config_dir": os.path.expanduser("~/.claude-secondary")},
             ]),
+            target_device=data.get("target_device", "ditoo"),
+            ditoo_mac=data.get("ditoo_mac", "B1:21:81:5B:E3:16"),
+            ditoo_port=data.get("ditoo_port", "AUTO"),
+            ditoo_auto_connect=bool(data.get("ditoo_auto_connect", True)),
+            ditoo_auto_rotation=bool(data.get("ditoo_auto_rotation", True)),
+            ditoo_is_paused=bool(data.get("ditoo_is_paused", False)),
+            ditoo_enabled_crypto_page=bool(data.get("ditoo_enabled_crypto_page", True)),
+            ditoo_enabled_stock_page=bool(data.get("ditoo_enabled_stock_page", True)),
+            ditoo_enabled_cryptos=data.get("ditoo_enabled_cryptos", ["btc", "eth", "sol", "doge", "pepe"]),
+            ditoo_stock_tickers=data.get("ditoo_stock_tickers", ["NVDA", "TSLA", "AAPL", "MSFT", "META"]),
+            ditoo_frame_logo_dwell=float(data.get("ditoo_frame_logo_dwell", 1.0)),
+            ditoo_frame_price_dwell=float(data.get("ditoo_frame_price_dwell", 2.0)),
+            ditoo_frame_change_dwell=float(data.get("ditoo_frame_change_dwell", 2.0)),
+            ditoo_brightness=int(data.get("ditoo_brightness", 100)),
+            ditoo_layout_mode=data.get("ditoo_layout_mode", "cycle"),
         )
         cfg.validate()
         return cfg

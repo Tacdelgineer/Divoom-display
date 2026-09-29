@@ -385,8 +385,81 @@ def run_cycle(
     except KeyboardInterrupt:
         print("\nRotation stopped by user.")
     finally:
-        if input_adapter:
-            input_adapter.close()
+        display.close()
+
+
+def run_ditoo_cycle(
+    display: DisplayBackend,
+    interval: float = 2.5,
+    max_count: Optional[int] = None,
+    tickers: Optional[List[str]] = None,
+    enable_btc: bool = True,
+    enable_stocks: bool = True,
+):
+    """
+    Dedicated 16x16 cycle loop for Divoom Ditoo / Ditoo Plus.
+    Rotates through:
+    1. BTC (Icon -> Price -> 24H Change)
+    2. Stocks (Symbol -> Price -> 24H Change)
+    """
+    from src.renderers.ditoo_16 import Btc16Renderer, Stock16Renderer
+    from collectors import MultiCryptoCollector
+    from market_provider import YahooFinanceMarketDataProvider
+
+    stock_universe = tickers or ["NVDA", "TSLA", "AAPL", "MSFT", "META"]
+    crypto_col = MultiCryptoCollector()
+    stocks_prov = YahooFinanceMarketDataProvider()
+
+    print(f"\nStarting Ditoo 16x16 rotation (BTC: {enable_btc}, Stocks: {stock_universe})...")
+    print("Press Ctrl+C to stop.\n")
+
+    count = 0
+    try:
+        while True:
+            # 1. BTC ROTATION
+            if enable_btc:
+                crypto_assets = crypto_col.get_all_assets()
+                btc = crypto_assets.get("btc")
+                btc_price = btc.price if btc else 68420.0
+                btc_pct = btc.change_24h_pct if btc else 2.4
+
+                count += 1
+                ts = time.strftime("%H:%M:%S")
+                print(f"[{ts}] Ditoo Step {count}: BTC ${btc_price:,.0f} ({btc_pct:+.1f}%)")
+
+                btc_frames = Btc16Renderer.render_cycle_frames(btc_price, btc_pct)
+                for f_idx, frame_img in enumerate(btc_frames):
+                    display.show(frame_img)
+                    dwell = 1.2 if f_idx == 0 else (interval if f_idx == 1 else 1.5)
+                    time.sleep(dwell)
+
+                if max_count and count >= max_count:
+                    return
+
+            # 2. STOCKS ROTATION
+            if enable_stocks:
+                quotes = {q.symbol: q for q in stocks_prov.get_top_volatile_stocks(universe=stock_universe)}
+                for sym in stock_universe:
+                    q = quotes.get(sym)
+                    price = q.price if q else 100.0
+                    ch = q.change_pct if q else 0.0
+
+                    count += 1
+                    ts = time.strftime("%H:%M:%S")
+                    print(f"[{ts}] Ditoo Step {count}: {sym} ${price:.2f} ({ch:+.1f}%)")
+
+                    stk_frames = Stock16Renderer.render_cycle_frames(sym, price, ch)
+                    for f_idx, frame_img in enumerate(stk_frames):
+                        display.show(frame_img)
+                        dwell = 1.0 if f_idx == 0 else (interval if f_idx == 1 else 1.5)
+                        time.sleep(dwell)
+
+                    if max_count and count >= max_count:
+                        return
+
+    except KeyboardInterrupt:
+        print("\nDitoo rotation stopped by user.")
+    finally:
         display.close()
 
 
@@ -398,8 +471,13 @@ def main():
         "--display",
         type=str,
         default="minitoo",
-        choices=["minitoo", "preview"],
-        help="Display output backend: 'minitoo' (hardware) or 'preview' (desktop image) (default: minitoo)",
+        choices=["minitoo", "ditoo", "preview"],
+        help="Display output backend: 'minitoo' (160x128), 'ditoo' (16x16 BLE), or 'preview' (desktop image) (default: minitoo)",
+    )
+    parser.add_argument(
+        "--ditoo-test",
+        action="store_true",
+        help="Execute 5-step hardware proof-of-life on Ditoo (red, green, blue, checkerboard, animation)",
     )
     parser.add_argument(
         "--preview",
@@ -489,6 +567,21 @@ def main():
         print_status(display_name=args.display, repo_path=args.repo, dgx_host=args.dgx_host)
         return
 
+    # Proof-of-life test for Ditoo
+    if args.ditoo_test:
+        from src.devices.ditoo import DitooDevice
+        import asyncio
+        dev = DitooDevice()
+        async def _test():
+            ok = await dev.connect()
+            if not ok:
+                print("Could not connect to Ditoo.")
+                return
+            await dev.run_proof_of_life()
+            await dev.disconnect()
+        asyncio.run(_test())
+        return
+
     # Initialize display backend
     display = get_display_backend(
         args.display,
@@ -497,6 +590,20 @@ def main():
         scale=3,
         auto_open=(args.display == "preview" and not args.cycle and args.page is not None),
     )
+
+    # Ditoo cycle mode
+    if args.display == "ditoo":
+        from config import DashboardConfig
+        cfg = DashboardConfig.load()
+        run_ditoo_cycle(
+            display=display,
+            interval=args.interval if args.interval != 4.0 else cfg.ditoo_rotation_interval,
+            max_count=args.count,
+            tickers=cfg.ditoo_stock_tickers,
+            enable_btc=cfg.ditoo_enabled_btc,
+            enable_stocks=cfg.ditoo_enabled_stocks,
+        )
+        return
 
     # Single page mode
     if args.page:

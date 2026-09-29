@@ -131,6 +131,16 @@ class DashboardConfig:
         {"id": "secondary", "user_label": "Secondary", "config_dir": os.path.expanduser("~/.claude-secondary")},
     ])
 
+    # Ditoo 16x16 Hardware Display Configuration
+    target_device: str = "minitoo"  # "minitoo" or "ditoo"
+    ditoo_mac: str = "B1:21:81:5B:E3:16"
+    ditoo_port: str = "AUTO"
+    ditoo_enabled_btc: bool = True
+    ditoo_enabled_stocks: bool = True
+    ditoo_stock_tickers: List[str] = field(default_factory=lambda: ["NVDA", "TSLA", "AAPL", "MSFT", "META"])
+    ditoo_rotation_interval: float = 3.0
+    ditoo_layout_mode: str = "cycle"  # "cycle", "split", "scroll"
+
     def validate(self) -> None:
         """Sanitize and ensure lists contain valid items."""
         # Ensure enabled_pages only contains recognized page IDs

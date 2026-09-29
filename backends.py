@@ -22,8 +22,8 @@ class DisplayBackend(ABC):
     """Abstract base class for dashboard display targets."""
 
     @abstractmethod
-    def show(self, img: Image.Image) -> bool:
-        """Render or transfer a 128x128 PIL Image. Return True on success."""
+    def show(self, img: Image.Image, **kwargs) -> bool:
+        """Render or transfer a PIL Image. Return True on success."""
         pass
 
     def close(self) -> None:
@@ -48,7 +48,7 @@ class DesktopPreviewDisplay(DisplayBackend):
         self.auto_open = auto_open
         self._has_opened = False
 
-    def show(self, img: Image.Image) -> bool:
+    def show(self, img: Image.Image, **kwargs) -> bool:
         try:
             # Save native 128x128 image
             img.save("screen.png")
@@ -252,11 +252,64 @@ class MiniTooDisplay(DisplayBackend):
         return False
 
 
+class DitooDisplay(DisplayBackend):
+    """
+    Divoom Ditoo / Ditoo Plus 16x16 physical display backend over BLE GATT or SPP.
+    """
+
+    def __init__(self, ble_address: str = "B1:21:81:5B:E3:16", port: Optional[str] = None):
+        self.ble_address = ble_address
+        self.port = port
+        self._device = None
+
+    def _get_device(self):
+        if self._device is None:
+            try:
+                from src.devices.ditoo import DitooDevice
+                self._device = DitooDevice(ble_address=self.ble_address, com_port=self.port)
+            except Exception as e:
+                print(f"[DITOO] Driver import error: {e}")
+        return self._device
+
+    def show(self, img: Image.Image, **kwargs) -> bool:
+        device = self._get_device()
+        if not device:
+            return False
+
+        import asyncio
+
+        async def _push():
+            if not device.is_connected:
+                ok = await device.connect()
+                if not ok:
+                    return False
+            return await device.show_frame(img)
+
+        try:
+            return asyncio.run(_push())
+        except Exception as e:
+            print(f"[DITOO] Display error: {e}")
+            return False
+
+    def close(self) -> None:
+        if self._device and self._device.is_connected:
+            import asyncio
+            try:
+                asyncio.run(self._device.disconnect())
+            except Exception:
+                pass
+
+
 def get_display_backend(name: str = "minitoo", **kwargs) -> DisplayBackend:
     """Factory helper to obtain a configured DisplayBackend instance."""
     normalized = name.lower().strip()
     if normalized in ("minitoo", "hardware", "device"):
         return MiniTooDisplay(port=kwargs.get("port"))
+    elif normalized in ("ditoo", "ditoo_16", "ditoo_plus"):
+        return DitooDisplay(
+            ble_address=kwargs.get("ble_address", "B1:21:81:5B:E3:16"),
+            port=kwargs.get("port")
+        )
     elif normalized in ("preview", "desktop", "desktop_preview"):
         return DesktopPreviewDisplay(
             output_path=kwargs.get("output_path", "preview_dashboard.png"),
@@ -264,4 +317,5 @@ def get_display_backend(name: str = "minitoo", **kwargs) -> DisplayBackend:
             auto_open=kwargs.get("auto_open", False),
         )
     else:
-        raise ValueError(f"Unknown display backend: {name}. Use 'minitoo' or 'preview'.")
+        raise ValueError(f"Unknown display backend: {name}. Use 'minitoo', 'ditoo', or 'preview'.")
+

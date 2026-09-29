@@ -18,7 +18,8 @@
 
 ## ⚡ Highlights
 
-- **Dual Display Model**: Run as a sleek standalone Windows desktop companion or stream 160×128 pixel frames live to a **Divoom MiniToo** desk display over Bluetooth SPP.
+- **Multi-Device Hardware Model**: Stream 160×128 pixel frames live to a **Divoom MiniToo** desk display over Bluetooth SPP, or stream dedicated 16×16 pixel art financial pages to a **Divoom Ditoo / Ditoo Plus** over direct BLE GATT.
+- **Dedicated 16×16 Ditoo Pixel Engine**: Purpose-built micro-pixel renderer for 16×16 displays with custom 3×5 typography, crisp Bitcoin coin badges, and rotating/scrolling stock pages (NVDA, TSLA, AAPL, MSFT, META).
 - **Configurable Sections & Presets**: Organize widgets into 4 modular sections (**CRYPTO**, **AI USAGE**, **SYSTEM**, **STOCKS**) with instant presets (**ALL**, **AI**, **MARKETS**, **SYSTEM**), full reordering, and visibility toggles.
 - **Multi-Asset Crypto Markets**: Real-time ticker prices, 24H percentage delta, and 24H phosphor sparklines for **BTC**, **ETH**, **SOL**, **DOGE**, and **PEPE** via a single consolidated public market-data request.
 - **Top 10 Volatile Stocks Scanner**: Scans high-beta US equities and ranks the top 10 most volatile stocks today using an objective, measurable intraday range formula: `(high - low) / previous_close * 100`.
@@ -145,10 +146,11 @@ See [docs/INSTALL.md](docs/INSTALL.md) for complete installation instructions an
 
 ## 🖥️ Supported Hardware
 
-- **Divoom MiniToo**: 160×128 color IPS LCD display over Bluetooth SPP.
-- **Physical Controls**: MiniToo rotary knob (navigation) and side buttons.
-- **Custom Display Channel**: Uses Channel 5 (Custom/DIY) to maintain host application ownership without firmware timeout to clock mode.
-- **Desktop-Only Mode**: Completely standalone mode for developers without MiniToo hardware.
+- **Divoom MiniToo**: 160×128 color IPS LCD display over Bluetooth SPP virtual serial port.
+- **Divoom Ditoo / Ditoo Plus**: 16×16 RGB LED pixel matrix display over direct BLE GATT (`DitooPro-Light` / Microchip ISSC Transparent UART) or Bluetooth SPP.
+- **Physical Controls**: MiniToo rotary knob (navigation) and Ditoo mechanical keys / lever.
+- **Custom Display Channel**: Uses Channel 5 (Custom/DIY) and command `0x8B` to maintain host application ownership without firmware timeout to clock mode.
+- **Desktop-Only Mode**: Completely standalone mode for developers without physical hardware.
 
 ---
 

@@ -576,11 +576,11 @@ class SettingsDialog(tk.Toplevel):
         self._refresh_sections_listbox()
 
         # ----------------------------------------------------------------------
-        # MINITOO DEVICE & ROTATION
+        # DEVICE SELECTION & ROTATION (MiniToo / Ditoo)
         # ----------------------------------------------------------------------
         sec2 = tk.LabelFrame(
             container,
-            text=" MINITOO DEVICE & ROTATION ",
+            text=" HARDWARE DISPLAY & ROTATION ",
             font=("Consolas", 8, "bold"),
             fg=C_TEXT_MUTED,
             bg=C_PANEL_BG,
@@ -592,10 +592,20 @@ class SettingsDialog(tk.Toplevel):
         )
         sec2.pack(fill="x", pady=4)
 
+        # Device Target Row
+        dev_row = tk.Frame(sec2, bg=C_PANEL_BG)
+        dev_row.pack(fill="x", pady=2)
+        tk.Label(dev_row, text="TARGET:", font=("Consolas", 8, "bold"), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=10, anchor="w").pack(side="left")
+        self.var_target_device = tk.StringVar(value="Ditoo 16x16 (BLE)" if getattr(self.config, "target_device", "minitoo") == "ditoo" else "MiniToo (160x128)")
+        om_dev = tk.OptionMenu(dev_row, self.var_target_device, "MiniToo (160x128)", "Ditoo 16x16 (BLE)")
+        om_dev.config(bg="#0D121D", fg=C_GOLD, font=("Consolas", 8, "bold"), highlightthickness=1, highlightbackground=C_BORDER)
+        om_dev["menu"].config(bg="#0D121D", fg=C_TEXT_WHITE, font=("Consolas", 8))
+        om_dev.pack(side="left", padx=4)
+
         d_row1 = tk.Frame(sec2, bg=C_PANEL_BG)
         d_row1.pack(fill="x", pady=2)
 
-        tk.Label(d_row1, text="PORT:", font=("Consolas", 8, "bold"), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=10, anchor="w").pack(side="left")
+        tk.Label(d_row1, text="PORT/MAC:", font=("Consolas", 8, "bold"), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=10, anchor="w").pack(side="left")
         available_ports = ["AUTO"] + [p["device"] for p in get_all_com_ports()]
         if self.config.minitoo_port not in available_ports:
             available_ports.append(self.config.minitoo_port)
@@ -605,6 +615,31 @@ class SettingsDialog(tk.Toplevel):
         om_port.config(bg="#0D121D", fg=C_CYAN, font=("Consolas", 8, "bold"), highlightthickness=1, highlightbackground=C_BORDER)
         om_port["menu"].config(bg="#0D121D", fg=C_TEXT_WHITE, font=("Consolas", 8))
         om_port.pack(side="left", padx=4)
+
+        # Ditoo specific controls
+        ditoo_box = tk.Frame(sec2, bg="#0D121D", highlightthickness=1, highlightbackground=C_BORDER, padx=6, pady=4)
+        ditoo_box.pack(fill="x", pady=4)
+
+        d_sub1 = tk.Frame(ditoo_box, bg="#0D121D")
+        d_sub1.pack(fill="x", pady=1)
+        tk.Label(d_sub1, text="DITOO TICKERS:", font=("Consolas", 7, "bold"), fg=C_CYAN, bg="#0D121D").pack(side="left")
+        default_tickers = ",".join(getattr(self.config, "ditoo_stock_tickers", ["NVDA", "TSLA", "AAPL", "MSFT", "META"]))
+        self.var_ditoo_tickers = tk.StringVar(value=default_tickers)
+        tk.Entry(d_sub1, textvariable=self.var_ditoo_tickers, font=("Consolas", 8), bg="#161F2E", fg=C_TEXT_WHITE, width=28).pack(side="left", padx=4)
+
+        d_sub2 = tk.Frame(ditoo_box, bg="#0D121D")
+        d_sub2.pack(fill="x", pady=2)
+        self.var_ditoo_btc = tk.BooleanVar(value=getattr(self.config, "ditoo_enabled_btc", True))
+        tk.Checkbutton(d_sub2, text="BTC", variable=self.var_ditoo_btc, font=("Consolas", 7, "bold"), fg=C_GOLD, bg="#0D121D", selectcolor="#000000").pack(side="left", padx=2)
+        self.var_ditoo_stocks = tk.BooleanVar(value=getattr(self.config, "ditoo_enabled_stocks", True))
+        tk.Checkbutton(d_sub2, text="STOCKS", variable=self.var_ditoo_stocks, font=("Consolas", 7, "bold"), fg=C_GREEN, bg="#0D121D", selectcolor="#000000").pack(side="left", padx=2)
+
+        def _open_preview():
+            p_path = os.path.abspath("previews_ditoo_16/composite_overview.png")
+            if os.path.exists(p_path) and sys.platform == "win32":
+                os.startfile(p_path)
+
+        tk.Button(d_sub2, text="PREVIEW 16x16", font=("Consolas", 7, "bold"), bg="#161F2E", fg=C_CYAN, bd=1, relief="solid", command=_open_preview).pack(side="right", padx=2)
 
         d_row2 = tk.Frame(sec2, bg=C_PANEL_BG)
         d_row2.pack(fill="x", pady=2)
@@ -835,6 +870,14 @@ class SettingsDialog(tk.Toplevel):
         self.config.launch_minimized = self.var_minimized.get()
         self.config.dgx_host = self.var_dgx.get().strip() or "dgx"
         self.config.coding_repo_path = self.var_repo.get().strip() or "."
+
+        # Ditoo fields
+        dev_choice = self.var_target_device.get()
+        self.config.target_device = "ditoo" if "Ditoo" in dev_choice else "minitoo"
+        self.config.ditoo_enabled_btc = self.var_ditoo_btc.get()
+        self.config.ditoo_enabled_stocks = self.var_ditoo_stocks.get()
+        raw_tickers = self.var_ditoo_tickers.get()
+        self.config.ditoo_stock_tickers = [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]
 
         self.config.save()
         self.destroy()

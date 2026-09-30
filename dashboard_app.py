@@ -108,6 +108,7 @@ def setup_logging():
 # RETRO COLOR PALETTE & DESIGN SYSTEM
 # ==============================================================================
 C_BG = "#0A0E17"           # Near-black deep space background
+C_HEADER_BG = "#080C12"    # Pinned navigation header background
 C_CARD_BG = "#111622"      # Dark slate card background
 C_CARD_BORDER = "#1E273A"  # Subdued card border
 C_CARD_HOVER = "#2D3B54"   # Card hover border
@@ -222,11 +223,19 @@ class DesktopDashboardApp:
         self._last_win_size: Optional[Tuple[int, int]] = None
         self._resize_job = None
 
-        # 3. Build GUI Canvas with smooth scroll support
+        # 3. Build Fixed Navigation Header Bar (Native Interactive Widgets)
+        self.header_frame = tk.Frame(self.root, bg=C_HEADER_BG)
+        self.header_frame.pack(side="top", fill="x")
+        self._build_header_widgets()
+
+        self.header_divider = tk.Frame(self.root, bg="#151D2A", height=1)
+        self.header_divider.pack(side="top", fill="x")
+
+        # 4. Build GUI Canvas with smooth scroll support
         self.canvas = tk.Canvas(
             self.root,
             width=win_w,
-            height=win_h,
+            height=win_h - ui_scale.header_height,
             bg=C_BG,
             highlightthickness=0,
         )
@@ -313,58 +322,452 @@ class DesktopDashboardApp:
             self._render_gui()
             return
         if getattr(self, "creator_mode", False):
-            self.creator_mode = False
-            self.config.creator_mode = False
-            self.config.save()
-            self._render_gui()
+            self._exit_creator()
             return
         if self.focus_section:
-            self.focus_section = None
-            self.config.focus_section = None
-            self.config.save()
-            self._render_gui()
+            self._exit_focus()
 
-    def _on_mouse_move(self, event):
-        canvas_x = self.canvas.canvasx(event.x)
-        canvas_y = self.canvas.canvasy(event.y)
-        prev_hover = self.hovered_card
-        self.hovered_card = None
+    def _create_retro_button(
+        self,
+        parent: tk.Widget,
+        text: str,
+        command: Any,
+        fg: str = C_ACTIVE_CYAN,
+        bg: str = "#101826",
+        active_fg: Optional[str] = None,
+        active_bg: str = "#1A273D",
+        border: str = "#202C3F",
+        active_border: str = C_ACTIVE_CYAN,
+        font: Optional[Any] = None,
+    ) -> tk.Button:
+        if font is None:
+            font = ui_scale.f_btn
+        if active_fg is None:
+            active_fg = fg
+        btn = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            font=font,
+            fg=fg,
+            bg=bg,
+            activeforeground=active_fg,
+            activebackground=active_bg,
+            relief="flat",
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=border,
+            highlightcolor=active_border,
+            cursor="hand2",
+        )
+        btn._default_border = border
+        btn._active_border = active_border
 
-        for p_id, (x1, y1, x2, y2) in self.card_bounds.items():
-            if x1 <= canvas_x <= x2 and y1 <= canvas_y <= y2:
-                self.hovered_card = p_id
-                break
+        def on_enter(e):
+            if btn["state"] != "disabled":
+                btn.config(highlightbackground=btn._active_border)
 
-        # Check all clickable elements for hand cursor
-        has_hand = False
-        clickable_bounds = [
-            self.card_bounds,
-            self.preset_bounds,
-            self.btn_bounds,
-            self.focus_btn_bounds,
-            self.device_btn_bounds,
-            self.creator_btn_bounds,
-            self.ditoo_btn_bounds,
-            self.ditoo_crypto_bounds,
-            self.ditoo_stock_bounds,
-        ]
-        for b_dict in clickable_bounds:
-            for b_name, (bx1, by1, bx2, by2) in b_dict.items():
-                if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
-                    has_hand = True
-                    break
-                if bx1 <= canvas_x <= bx2 and by1 <= canvas_y <= by2:
-                    has_hand = True
-                    break
-            if has_hand:
-                break
+        def on_leave(e):
+            if btn["state"] != "disabled":
+                btn.config(highlightbackground=btn._default_border)
 
-        self.canvas.config(cursor="hand2" if has_hand else "")
+        btn._on_enter = on_enter
+        btn._on_leave = on_leave
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        return btn
 
-        if self.hovered_card != prev_hover:
-            self._render_gui()
+    def _build_header_widgets(self):
+        """Construct the fixed navigation header widgets (Milestone 14.1 Hotfix)."""
+        if hasattr(self, "header_frame") and self.header_frame:
+            for w in self.header_frame.winfo_children():
+                w.destroy()
+        else:
+            self.header_frame = tk.Frame(self.root, bg=C_HEADER_BG)
+            self.header_frame.pack(side="top", fill="x")
 
-    def _show_device_menu(self, event_x: int, event_y: int):
+        # 1. Normal Navigation Bar
+        self.nav_normal_frame = tk.Frame(self.header_frame, bg=C_HEADER_BG)
+        self.nav_normal_frame.pack(fill="x", padx=0, pady=ui_scale.s(6))
+
+        # Title Label
+        self.lbl_title = tk.Label(
+            self.nav_normal_frame,
+            text="AI DESK DASHBOARD",
+            font=ui_scale.f_app_title,
+            fg=C_ACTIVE_CYAN,
+            bg=C_HEADER_BG,
+        )
+        self.lbl_title.pack(side="left", padx=(ui_scale.grid_margin, ui_scale.s(20)))
+
+        # Device Selector Button
+        self.btn_device = self._create_retro_button(
+            self.nav_normal_frame,
+            text="🖥 MiniToo ▼",
+            command=self._on_device_btn_clicked,
+            fg=C_ACTIVE_CYAN,
+            bg="#101826",
+            border=C_ACTIVE_CYAN,
+            active_border=C_ACTIVE_CYAN,
+        )
+        self.btn_device.pack(side="left", padx=(0, ui_scale.s(18)), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+
+        # MiniToo Presets Frame
+        self.frame_minitoo_nav = tk.Frame(self.nav_normal_frame, bg=C_HEADER_BG)
+        self.lbl_preset = tk.Label(
+            self.frame_minitoo_nav,
+            text="PRESET:",
+            font=ui_scale.f_meta,
+            fg=C_TEXT_DIM,
+            bg=C_HEADER_BG,
+        )
+        self.lbl_preset.pack(side="left", padx=(0, ui_scale.s(6)))
+
+        self.preset_btn_widgets: Dict[str, tk.Button] = {}
+        for p_name in ["ALL", "AI", "CRYPTO", "STOCKS", "SYSTEM"]:
+            b = self._create_retro_button(
+                self.frame_minitoo_nav,
+                text=p_name,
+                command=lambda p=p_name: self._apply_preset_shortcut(p),
+                fg=C_TEXT_MUTED,
+                bg="#101622",
+                border="#1C2536",
+            )
+            b.pack(side="left", padx=ui_scale.s(3), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+            self.preset_btn_widgets[p_name] = b
+
+        self.btn_focus_exit = self._create_retro_button(
+            self.frame_minitoo_nav,
+            text="✕ FOCUS",
+            command=self._exit_focus,
+            fg=C_RED,
+            bg="#2A1717",
+            active_bg="#3D1F1F",
+            active_fg=C_RED,
+            border=C_RED,
+            active_border=C_RED,
+        )
+
+        # Ditoo Controls Frame
+        self.frame_ditoo_nav = tk.Frame(self.nav_normal_frame, bg=C_HEADER_BG)
+        self.btn_ditoo_prev = self._create_retro_button(
+            self.frame_ditoo_nav,
+            text="◀ PREV",
+            command=self._on_ditoo_prev,
+            fg=C_TEXT_WHITE,
+            bg="#121A28",
+            border="#202A3C",
+        )
+        self.btn_ditoo_prev.pack(side="left", padx=ui_scale.s(3), ipady=ui_scale.s(3), ipadx=ui_scale.s(6))
+
+        self.btn_ditoo_pause = self._create_retro_button(
+            self.frame_ditoo_nav,
+            text="⏸ PAUSE",
+            command=self._on_ditoo_pause,
+            fg=C_GREEN,
+            bg="#0D261B",
+            border="#1B4D36",
+            active_border=C_GREEN,
+        )
+        self.btn_ditoo_pause.pack(side="left", padx=ui_scale.s(3), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+
+        self.btn_ditoo_next = self._create_retro_button(
+            self.frame_ditoo_nav,
+            text="NEXT ▶",
+            command=self._on_ditoo_next,
+            fg=C_TEXT_WHITE,
+            bg="#121A28",
+            border="#202A3C",
+        )
+        self.btn_ditoo_next.pack(side="left", padx=ui_scale.s(3), ipady=ui_scale.s(3), ipadx=ui_scale.s(6))
+
+        self.btn_ditoo_rot = self._create_retro_button(
+            self.frame_ditoo_nav,
+            text="ROT: ON",
+            command=self._on_ditoo_rot,
+            fg=C_GREEN,
+            bg="#121A28",
+            border="#202A3C",
+            active_border=C_GREEN,
+        )
+        self.btn_ditoo_rot.pack(side="left", padx=ui_scale.s(3), ipady=ui_scale.s(3), ipadx=ui_scale.s(6))
+
+        # Expanding Spacer in middle
+        self.nav_spacer = tk.Frame(self.nav_normal_frame, bg=C_HEADER_BG)
+        self.nav_spacer.pack(side="left", fill="x", expand=True)
+
+        # Right-side Utility Controls (packed to right)
+        self.btn_settings = self._create_retro_button(
+            self.nav_normal_frame,
+            text="⚙ SETTINGS",
+            command=self._open_settings,
+            fg=C_ACTIVE_CYAN,
+            bg="#131B2A",
+            border="#25354F",
+            active_border=C_ACTIVE_CYAN,
+        )
+        self.btn_settings.pack(side="right", padx=(ui_scale.s(6), ui_scale.grid_margin), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+
+        self.btn_auto = self._create_retro_button(
+            self.nav_normal_frame,
+            text="⚡ AUTO: ON" if self.autostart_enabled else "⚡ AUTO: OFF",
+            command=self._toggle_autostart,
+            fg=C_GREEN if self.autostart_enabled else C_TEXT_MUTED,
+            bg="#0E2419" if self.autostart_enabled else "#151B27",
+            border="#1E4733" if self.autostart_enabled else "#253047",
+            active_border=C_GREEN if self.autostart_enabled else "#253047",
+        )
+        self.btn_auto.pack(side="right", padx=ui_scale.s(6), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+
+        self.btn_creator = self._create_retro_button(
+            self.nav_normal_frame,
+            text="🎬 CREATOR",
+            command=self._toggle_creator,
+            fg=C_PURPLE,
+            bg="#1B1428",
+            border="#40255F",
+            active_border=C_PURPLE,
+        )
+        self.btn_creator.pack(side="right", padx=ui_scale.s(6), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+
+        self.lbl_status_pill = tk.Label(
+            self.nav_normal_frame,
+            text="● MINITOO CONNECTED",
+            font=ui_scale.f_badge,
+            fg=C_GREEN,
+            bg="#0D261B",
+            relief="solid",
+            bd=1,
+            highlightthickness=1,
+            highlightbackground="#1B4D36",
+        )
+        self.lbl_status_pill.pack(side="right", padx=ui_scale.s(10), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+
+        # 2. Creator Capture Navigation Bar
+        self.nav_creator_frame = tk.Frame(self.header_frame, bg=C_HEADER_BG)
+
+        self.btn_creator_exit = self._create_retro_button(
+            self.nav_creator_frame,
+            text="✕ EXIT CREATOR (Esc)",
+            command=self._exit_creator,
+            fg=C_RED,
+            bg="#2B1414",
+            active_bg="#3D1F1F",
+            active_fg=C_RED,
+            border=C_RED,
+            active_border=C_RED,
+        )
+        self.btn_creator_exit.pack(side="left", padx=(ui_scale.grid_margin, ui_scale.s(16)), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+
+        self.lbl_cr_ratio = tk.Label(
+            self.nav_creator_frame,
+            text="CAPTURE RATIO:",
+            font=ui_scale.f_meta,
+            fg=C_TEXT_DIM,
+            bg=C_HEADER_BG,
+        )
+        self.lbl_cr_ratio.pack(side="left", padx=(0, ui_scale.s(6)))
+
+        self.btn_c_16_9 = self._create_retro_button(
+            self.nav_creator_frame,
+            text="16:9",
+            command=lambda: self._set_creator_aspect("16:9"),
+            fg=C_ACTIVE_CYAN if self.creator_aspect == "16:9" else C_TEXT_MUTED,
+            bg="#0B384A" if self.creator_aspect == "16:9" else "#101622",
+            border=C_ACTIVE_CYAN if self.creator_aspect == "16:9" else "#1C2536",
+        )
+        self.btn_c_16_9.pack(side="left", padx=ui_scale.s(3), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+
+        self.btn_c_9_16 = self._create_retro_button(
+            self.nav_creator_frame,
+            text="9:16 SHORTS",
+            command=lambda: self._set_creator_aspect("9:16"),
+            fg=C_ACTIVE_CYAN if self.creator_aspect == "9:16" else C_TEXT_MUTED,
+            bg="#0B384A" if self.creator_aspect == "9:16" else "#101622",
+            border=C_ACTIVE_CYAN if self.creator_aspect == "9:16" else "#1C2536",
+        )
+        self.btn_c_9_16.pack(side="left", padx=ui_scale.s(3), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+
+        self.lbl_cr_preset = tk.Label(
+            self.nav_creator_frame,
+            text="PRESET:",
+            font=ui_scale.f_meta,
+            fg=C_TEXT_DIM,
+            bg=C_HEADER_BG,
+        )
+        self.lbl_cr_preset.pack(side="left", padx=(ui_scale.s(12), ui_scale.s(6)))
+
+        self.creator_preset_btn_widgets: Dict[str, tk.Button] = {}
+        for p_name in ["ALL", "AI", "CRYPTO", "STOCKS", "SYSTEM"]:
+            b = self._create_retro_button(
+                self.nav_creator_frame,
+                text=p_name,
+                command=lambda p=p_name: self._apply_preset_shortcut(p),
+                fg=C_TEXT_MUTED,
+                bg="#101622",
+                border="#1C2536",
+            )
+            b.pack(side="left", padx=ui_scale.s(3), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+            self.creator_preset_btn_widgets[p_name] = b
+
+        self.cr_spacer = tk.Frame(self.nav_creator_frame, bg=C_HEADER_BG)
+        self.cr_spacer.pack(side="left", fill="x", expand=True)
+
+        self.lbl_cr_title = tk.Label(
+            self.nav_creator_frame,
+            text="FILMING & CAPTURE VIEW",
+            font=ui_scale.f_meta,
+            fg=C_TEXT_DIM,
+            bg=C_HEADER_BG,
+        )
+        self.lbl_cr_title.pack(side="right", padx=ui_scale.grid_margin)
+
+    def _update_header_widgets(self):
+        """Update header widget colors, text, and active states."""
+        target = getattr(self.config, "target_device", "minitoo").lower()
+
+        if self.creator_mode:
+            self.nav_normal_frame.pack_forget()
+            self.nav_creator_frame.pack(fill="x", padx=0, pady=ui_scale.s(6))
+
+            asp_16 = (self.creator_aspect == "16:9")
+            self.btn_c_16_9._default_border = C_ACTIVE_CYAN if asp_16 else "#1C2536"
+            self.btn_c_16_9.config(
+                bg="#0B384A" if asp_16 else "#101622",
+                fg=C_ACTIVE_CYAN if asp_16 else C_TEXT_MUTED,
+                highlightbackground=self.btn_c_16_9._default_border,
+            )
+
+            asp_9 = (self.creator_aspect == "9:16")
+            self.btn_c_9_16._default_border = C_ACTIVE_CYAN if asp_9 else "#1C2536"
+            self.btn_c_9_16.config(
+                bg="#0B384A" if asp_9 else "#101622",
+                fg=C_ACTIVE_CYAN if asp_9 else C_TEXT_MUTED,
+                highlightbackground=self.btn_c_9_16._default_border,
+            )
+
+            for p_name, b in self.creator_preset_btn_widgets.items():
+                is_active = (self.config.active_preset == p_name)
+                b._default_border = C_ACTIVE_CYAN if is_active else "#1C2536"
+                b.config(
+                    bg="#0B384A" if is_active else "#101622",
+                    fg=C_ACTIVE_CYAN if is_active else C_TEXT_MUTED,
+                    highlightbackground=b._default_border,
+                )
+            return
+
+        # Normal Bar
+        self.nav_creator_frame.pack_forget()
+        self.nav_normal_frame.pack(fill="x", padx=0, pady=ui_scale.s(6))
+
+        dev_labels = {
+            "minitoo": "🖥 MiniToo ▼",
+            "ditoo": "👾 Ditoo ▼",
+            "preview": "👁 Dual ▼",
+        }
+        self.btn_device.config(text=dev_labels.get(target, "🖥 MiniToo ▼"))
+
+        if target == "ditoo":
+            self.frame_minitoo_nav.pack_forget()
+            self.frame_ditoo_nav.pack(side="left")
+
+            if self.config.ditoo_is_paused:
+                self.btn_ditoo_pause._default_border = C_AMBER
+                self.btn_ditoo_pause.config(
+                    text="▶ RESUME",
+                    fg=C_AMBER,
+                    bg="#261D0D",
+                    highlightbackground=C_AMBER,
+                )
+            else:
+                self.btn_ditoo_pause._default_border = "#1B4D36"
+                self.btn_ditoo_pause.config(
+                    text="⏸ PAUSE",
+                    fg=C_GREEN,
+                    bg="#0D261B",
+                    highlightbackground="#1B4D36",
+                )
+
+            if self.config.ditoo_auto_rotation:
+                self.btn_ditoo_rot._default_border = "#202A3C"
+                self.btn_ditoo_rot.config(
+                    text="ROT: ON",
+                    fg=C_GREEN,
+                    bg="#121A28",
+                    highlightbackground="#202A3C",
+                )
+            else:
+                self.btn_ditoo_rot._default_border = "#202A3C"
+                self.btn_ditoo_rot.config(
+                    text="ROT: OFF",
+                    fg=C_TEXT_MUTED,
+                    bg="#121A28",
+                    highlightbackground="#202A3C",
+                )
+        else:
+            self.frame_ditoo_nav.pack_forget()
+            self.frame_minitoo_nav.pack(side="left")
+
+            for p_name, b in self.preset_btn_widgets.items():
+                is_active = (self.config.active_preset == p_name and not self.focus_section)
+                b._default_border = C_ACTIVE_CYAN if is_active else "#1C2536"
+                b.config(
+                    bg="#0B384A" if is_active else "#101622",
+                    fg=C_ACTIVE_CYAN if is_active else C_TEXT_MUTED,
+                    highlightbackground=b._default_border,
+                )
+
+            if self.focus_section:
+                if not self.btn_focus_exit.winfo_ismapped():
+                    self.btn_focus_exit.pack(side="left", padx=(ui_scale.s(6), 0), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+            else:
+                if self.btn_focus_exit.winfo_ismapped():
+                    self.btn_focus_exit.pack_forget()
+
+        auto_text = "⚡ AUTO: ON" if self.autostart_enabled else "⚡ AUTO: OFF"
+        auto_fg = C_GREEN if self.autostart_enabled else C_TEXT_MUTED
+        auto_bg = "#0E2419" if self.autostart_enabled else "#151B27"
+        auto_border = "#1E4733" if self.autostart_enabled else "#253047"
+        self.btn_auto._default_border = auto_border
+        self.btn_auto._active_border = C_GREEN if self.autostart_enabled else "#253047"
+        self.btn_auto.config(
+            text=auto_text,
+            fg=auto_fg,
+            bg=auto_bg,
+            highlightbackground=auto_border,
+        )
+
+        if target == "ditoo":
+            conn = self.state.ditoo_connected
+            status_str = self.state.ditoo_status_text
+            pill_color = C_GREEN if conn else (C_AMBER if "RECONNECTING" in status_str else C_RED)
+            pill_bg = "#0D261B" if conn else ("#261D0D" if "RECONNECTING" in status_str else "#2A1111")
+            pill_border = "#1B4D36" if conn else ("#4D361B" if "RECONNECTING" in status_str else "#4D1B1B")
+            pill_text = f"● {status_str[:22]}"
+        elif target == "preview":
+            conn = self.state.ditoo_connected or self.state.minitoo_connected
+            d_st = "DITOO ● " if self.state.ditoo_connected else "DITOO ○ "
+            m_st = "MINITOO ●" if self.state.minitoo_connected else "MINITOO ○"
+            pill_text = f"DUAL: {d_st}| {m_st}"
+            pill_color = C_ACTIVE_CYAN if conn else C_AMBER
+            pill_bg = "#09222E"
+            pill_border = "#13495F"
+        else:
+            conn = self.state.minitoo_connected
+            status_str = self.state.minitoo_status_text
+            pill_color = C_GREEN if conn else C_AMBER
+            pill_bg = "#0D261B" if conn else "#261D0D"
+            pill_border = "#1B4D36" if conn else "#4D361B"
+            pill_text = f"● {status_str[:22]}"
+
+        self.lbl_status_pill.config(
+            text=pill_text,
+            fg=pill_color,
+            bg=pill_bg,
+            highlightbackground=pill_border,
+        )
+
+    def _on_device_btn_clicked(self):
         menu = tk.Menu(
             self.root,
             tearoff=0,
@@ -377,9 +780,12 @@ class DesktopDashboardApp:
         menu.add_command(label="🖥 MiniToo (160x128 LCD)", command=lambda: self._select_device("minitoo"))
         menu.add_command(label="👾 Ditoo (16x16 Matrix)", command=lambda: self._select_device("ditoo"))
         menu.add_command(label="👁 Dual Preview (Both Displays)", command=lambda: self._select_device("preview"))
-        root_x = self.root.winfo_rootx() + event_x
-        root_y = self.root.winfo_rooty() + event_y
-        menu.tk_popup(root_x, root_y)
+        try:
+            root_x = self.btn_device.winfo_rootx()
+            root_y = self.btn_device.winfo_rooty() + self.btn_device.winfo_height() + 2
+            menu.tk_popup(root_x, root_y)
+        except Exception:
+            pass
 
     def _select_device(self, dev_name: str):
         if self.config.target_device != dev_name:
@@ -388,50 +794,101 @@ class DesktopDashboardApp:
             self.config.save()
             self._render_gui()
 
+    def _exit_focus(self):
+        self.focus_section = None
+        self.config.focus_section = None
+        self.config.save()
+        self._render_gui()
+
+    def _toggle_creator(self):
+        self.creator_mode = not self.creator_mode
+        self.config.creator_mode = self.creator_mode
+        self.config.save()
+        self._render_gui()
+
+    def _exit_creator(self):
+        self.creator_mode = False
+        self.config.creator_mode = False
+        self.config.save()
+        self._render_gui()
+
+    def _set_creator_aspect(self, aspect: str):
+        self.creator_aspect = aspect
+        self.config.creator_aspect = aspect
+        self.config.save()
+        self._render_gui()
+
+    def _toggle_autostart(self):
+        new_val = not self.autostart_enabled
+        if WindowsAutostart.set_enabled(new_val):
+            self.autostart_enabled = new_val
+            self.config.start_with_windows = new_val
+            self.config.save()
+        self._render_gui()
+
+    def _on_ditoo_prev(self):
+        self.ditoo.prev_asset()
+        self._render_gui()
+
+    def _on_ditoo_pause(self):
+        self.ditoo.toggle_pause()
+        self._render_gui()
+
+    def _on_ditoo_next(self):
+        self.ditoo.next_asset()
+        self._render_gui()
+
+    def _on_ditoo_rot(self):
+        self.config.ditoo_auto_rotation = not self.config.ditoo_auto_rotation
+        self.config.save()
+        self._render_gui()
+
+    def _on_mouse_move(self, event):
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        prev_hover = self.hovered_card
+        self.hovered_card = None
+
+        for p_id, (x1, y1, x2, y2) in self.card_bounds.items():
+            if x1 <= canvas_x <= x2 and y1 <= canvas_y <= y2:
+                self.hovered_card = p_id
+                break
+
+        has_hand = (self.hovered_card is not None)
+        if not has_hand:
+            clickable_bounds = [
+                self.focus_btn_bounds,
+                self.ditoo_btn_bounds,
+                self.ditoo_crypto_bounds,
+                self.ditoo_stock_bounds,
+            ]
+            for b_dict in clickable_bounds:
+                for b_name, (bx1, by1, bx2, by2) in b_dict.items():
+                    if bx1 <= canvas_x <= bx2 and by1 <= canvas_y <= by2:
+                        has_hand = True
+                        break
+                if has_hand:
+                    break
+
+        self.canvas.config(cursor="hand2" if has_hand else "")
+
+        if self.hovered_card != prev_hover:
+            self._render_gui()
+
     def _on_mouse_click(self, event):
-        x, y = event.x, event.y
-        canvas_x = self.canvas.canvasx(x)
-        canvas_y = self.canvas.canvasy(y)
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
 
-        # 0. Creator Mode Buttons
-        if self.creator_mode:
-            for c_key, (cx1, cy1, cx2, cy2) in self.creator_btn_bounds.items():
-                if cx1 <= x <= cx2 and cy1 <= y <= cy2:
-                    if c_key == "exit":
-                        self.creator_mode = False
-                        self.config.creator_mode = False
-                        self.config.save()
-                        self._render_gui()
-                    elif c_key == "aspect_16_9":
-                        self.creator_aspect = "16:9"
-                        self.config.creator_aspect = "16:9"
-                        self.config.save()
-                        self._render_gui()
-                    elif c_key == "aspect_9_16":
-                        self.creator_aspect = "9:16"
-                        self.config.creator_aspect = "9:16"
-                        self.config.save()
-                        self._render_gui()
-                    elif c_key.startswith("preset_"):
-                        p_name = c_key.replace("preset_", "")
-                        self.config.apply_preset(p_name)
-                        self.config.save()
-                        self._render_gui()
-                    return
-
-        # 1. Focus Mode buttons
+        # 1. Focus Mode buttons on canvas
         if "back_all" in self.focus_btn_bounds:
             bx1, by1, bx2, by2 = self.focus_btn_bounds["back_all"]
-            if (bx1 <= canvas_x <= bx2 and by1 <= canvas_y <= by2) or (bx1 <= x <= bx2 and by1 <= y <= by2):
-                self.focus_section = None
-                self.config.focus_section = None
-                self.config.save()
-                self._render_gui()
+            if bx1 <= canvas_x <= bx2 and by1 <= canvas_y <= by2:
+                self._exit_focus()
                 return
 
         for sec_id, (fx1, fy1, fx2, fy2) in self.focus_btn_bounds.items():
             if sec_id != "back_all":
-                if (fx1 <= canvas_x <= fx2 and fy1 <= canvas_y <= fy2) or (fx1 <= x <= fx2 and fy1 <= y <= fy2):
+                if fx1 <= canvas_x <= fx2 and fy1 <= canvas_y <= fy2:
                     if self.focus_section == sec_id:
                         self.focus_section = None
                         self.config.focus_section = None
@@ -442,67 +899,11 @@ class DesktopDashboardApp:
                     self._render_gui()
                     return
 
-        # 2. Device Selector Dropdown Button
-        if "device_selector" in self.device_btn_bounds:
-            dx1, dy1, dx2, dy2 = self.device_btn_bounds["device_selector"]
-            if dx1 <= x <= dx2 and dy1 <= y <= dy2:
-                self._show_device_menu(dx1, dy2 + 2)
-                return
-
-        # 3. Creator Mode Toggle
-        if "creator_toggle" in self.btn_bounds:
-            cx1, cy1, cx2, cy2 = self.btn_bounds["creator_toggle"]
-            if cx1 <= x <= cx2 and cy1 <= y <= cy2:
-                self.creator_mode = not self.creator_mode
-                self.config.creator_mode = self.creator_mode
-                self.config.save()
-                self._render_gui()
-                return
-
-        # 4. Autostart button
-        if "autostart" in self.btn_bounds:
-            ax1, ay1, ax2, ay2 = self.btn_bounds["autostart"]
-            if ax1 <= x <= ax2 and ay1 <= y <= ay2:
-                new_val = not self.autostart_enabled
-                if WindowsAutostart.set_enabled(new_val):
-                    self.autostart_enabled = new_val
-                    self.config.start_with_windows = new_val
-                    self.config.save()
-                    self._render_gui()
-                return
-
-        # 5. Settings button
-        if "settings" in self.btn_bounds:
-            sx1, sy1, sx2, sy2 = self.btn_bounds["settings"]
-            if sx1 <= x <= sx2 and sy1 <= y <= sy2:
-                self._open_settings()
-                return
-
-        # 6. Preset buttons (in MiniToo mode)
-        for p_name, (bx1, by1, bx2, by2) in self.preset_bounds.items():
-            if bx1 <= x <= bx2 and by1 <= y <= by2:
-                print(f"[APP] Applying Preset: {p_name}")
-                self.config.apply_preset(p_name)
-                self.focus_section = None
-                self.config.focus_section = None
-                self.config.save()
-                self._render_gui()
-                return
-
-        # 7. Ditoo Controls (when in Ditoo mode)
+        # 2. Ditoo Controls (when in Ditoo mode)
         if self.config.target_device == "ditoo":
             for btn_key, (bx1, by1, bx2, by2) in self.ditoo_btn_bounds.items():
-                if (bx1 <= canvas_x <= bx2 and by1 <= canvas_y <= by2) or (bx1 <= x <= bx2 and by1 <= y <= by2):
-                    if btn_key == "pause":
-                        self.ditoo.toggle_pause()
-                    elif btn_key == "prev":
-                        self.ditoo.prev_asset()
-                    elif btn_key == "next":
-                        self.ditoo.next_asset()
-                    elif btn_key == "rot_toggle":
-                        self.config.ditoo_auto_rotation = not self.config.ditoo_auto_rotation
-                        self.config.save()
-                    elif btn_key == "bright_down":
+                if bx1 <= canvas_x <= bx2 and by1 <= canvas_y <= by2:
+                    if btn_key == "bright_down":
                         b = max(10, self.config.ditoo_brightness - 10)
                         self.ditoo.set_brightness(b)
                     elif btn_key == "bright_up":
@@ -574,7 +975,7 @@ class DesktopDashboardApp:
                     self._render_gui()
                     return
 
-        # 8. Card clicked -> route to MiniToo
+        # 3. Card clicked -> route to MiniToo
         if self.config.target_device == "minitoo":
             for p_id, (cx1, cy1, cx2, cy2) in self.card_bounds.items():
                 if cx1 <= canvas_x <= cx2 and cy1 <= canvas_y <= cy2:
@@ -603,6 +1004,7 @@ class DesktopDashboardApp:
         self.engine.update_config(new_config)
         self.minitoo.update_config(new_config)
         self.ditoo.update_config(new_config)
+        self._build_header_widgets()
         self._render_gui()
 
     def _on_close(self):
@@ -645,31 +1047,25 @@ class DesktopDashboardApp:
         if cur_w < min_w:
             cur_w = min_w
 
+        self._update_header_widgets()
+
         self.canvas.delete("all")
         self.card_bounds.clear()
-        self.preset_bounds.clear()
-        self.btn_bounds.clear()
         self.focus_btn_bounds.clear()
-        self.device_btn_bounds.clear()
-        self.creator_btn_bounds.clear()
         self.ditoo_btn_bounds.clear()
         self.ditoo_crypto_bounds.clear()
         self.ditoo_stock_bounds.clear()
 
         # Handle Creator Capture Mode
         if self.creator_mode:
-            curr_y = self._draw_creator_header(cur_w)
-            curr_y = self._draw_creator_view(curr_y, cur_w)
+            curr_y = self._draw_creator_view(ui_scale.s(12), cur_w)
             max_scroll_y = max(ui_scale.default_window_h, curr_y + ui_scale.s(30))
             self.canvas.configure(scrollregion=(0, 0, cur_w, max_scroll_y))
             self._schedule_next_refresh()
             return
 
-        # 1. Clean Navigation Bar with Device Selector & Presets
-        self._draw_header(cur_w)
-
-        # 2. Main Content View based on Selected Device
-        curr_y = ui_scale.header_height + ui_scale.s(10)
+        # Main Content View based on Selected Device
+        curr_y = ui_scale.s(12)
         target = getattr(self.config, "target_device", "minitoo").lower()
 
         if target == "ditoo":
@@ -679,7 +1075,7 @@ class DesktopDashboardApp:
         else:
             curr_y = self._draw_minitoo_sections(curr_y, cur_w)
 
-        # 3. Scaled Footer Bar
+        # Scaled Footer Bar
         self._draw_footer(curr_y, cur_w)
 
         # Update scrollregion
@@ -694,270 +1090,6 @@ class DesktopDashboardApp:
             except Exception:
                 pass
         self._after_id = self.root.after(350, self._render_gui)
-
-    # --------------------------------------------------------------------------
-    # HEADER & CONTROLS (Milestone 14 Polish)
-    # --------------------------------------------------------------------------
-    def _draw_header(self, cur_w: int):
-        target = getattr(self.config, "target_device", "minitoo").lower()
-        margin = ui_scale.grid_margin
-        btn_h = ui_scale.btn_h
-        y_top = ui_scale.s(14)
-
-        # 1. Brand App Title (Consolas 13 bold)
-        self.canvas.create_text(
-            margin,
-            y_top + btn_h // 2,
-            text="AI DESK DASHBOARD",
-            font=ui_scale.f_app_title,
-            fill=C_ACTIVE_CYAN,
-            anchor="w",
-        )
-
-        title_w = ui_scale.s(170)
-        curr_x = margin + title_w + ui_scale.s(12)
-
-        # 2. Sleek Device Selector Dropdown Button
-        dev_labels = {
-            "minitoo": "🖥 MiniToo ▼",
-            "ditoo": "👾 Ditoo ▼",
-            "preview": "👁 Dual ▼",
-        }
-        dev_text = dev_labels.get(target, "🖥 MiniToo ▼")
-        dev_w = ui_scale.s(116)
-        dev_x1 = curr_x
-        dev_y1 = y_top
-        dev_x2 = dev_x1 + dev_w
-        dev_y2 = dev_y1 + btn_h
-
-        self.canvas.create_rectangle(dev_x1, dev_y1, dev_x2, dev_y2, fill="#101826", outline=C_ACTIVE_CYAN, width=1)
-        self.canvas.create_text(
-            (dev_x1 + dev_x2) // 2,
-            (dev_y1 + dev_y2) // 2,
-            text=dev_text,
-            font=ui_scale.f_btn,
-            fill=C_ACTIVE_CYAN,
-            anchor="center",
-        )
-        self.device_btn_bounds["device_selector"] = (dev_x1, dev_y1, dev_x2, dev_y2)
-        curr_x = dev_x2 + ui_scale.s(16)
-
-        # 3. Clean Preset Buttons (Prominent, High Hit Target)
-        if target != "ditoo":
-            self.canvas.create_text(
-                curr_x,
-                y_top + btn_h // 2,
-                text="PRESET:",
-                font=ui_scale.f_meta,
-                fill=C_TEXT_DIM,
-                anchor="w",
-            )
-            curr_x += ui_scale.s(52)
-
-            preset_labels = ["ALL", "AI", "CRYPTO", "STOCKS", "SYSTEM"]
-            pw = ui_scale.s(56)
-
-            for p_name in preset_labels:
-                is_active = (self.config.active_preset == p_name and not self.focus_section)
-                p_bg = "#0B384A" if is_active else "#101622"
-                p_fg = C_ACTIVE_CYAN if is_active else C_TEXT_MUTED
-                p_border = C_ACTIVE_CYAN if is_active else "#1C2536"
-
-                bx1 = curr_x
-                by1 = y_top
-                bx2 = bx1 + pw
-                by2 = by1 + btn_h
-
-                self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=p_bg, outline=p_border, width=2 if is_active else 1)
-                self.canvas.create_text(
-                    (bx1 + bx2) // 2,
-                    (by1 + by2) // 2,
-                    text=p_name,
-                    font=ui_scale.f_btn,
-                    fill=p_fg,
-                    anchor="center",
-                )
-                self.preset_bounds[p_name] = (bx1, by1, bx2, by2)
-                curr_x += pw + ui_scale.s(6)
-
-            if self.focus_section:
-                ex_w = ui_scale.s(82)
-                ex_x1 = curr_x + ui_scale.s(4)
-                ex_x2 = ex_x1 + ex_w
-                self.canvas.create_rectangle(ex_x1, y_top, ex_x2, y_top + btn_h, fill="#2A1717", outline=C_RED, width=1)
-                self.canvas.create_text(
-                    (ex_x1 + ex_x2) // 2,
-                    y_top + btn_h // 2,
-                    text="✕ FOCUS",
-                    font=ui_scale.f_btn,
-                    fill=C_RED,
-                    anchor="center",
-                )
-                self.focus_btn_bounds["back_all"] = (ex_x1, y_top, ex_x2, y_top + btn_h)
-
-        elif target == "ditoo":
-            # Ditoo Playback Quick Controls on Navigation Bar
-            d_btns = [
-                ("prev", "◀ PREV", ui_scale.s(60), "#121A28", C_TEXT_WHITE),
-                ("pause", "▶ RESUME" if self.config.ditoo_is_paused else "⏸ PAUSE", ui_scale.s(78), "#261D0D" if self.config.ditoo_is_paused else "#0D261B", C_AMBER if self.config.ditoo_is_paused else C_GREEN),
-                ("next", "NEXT ▶", ui_scale.s(60), "#121A28", C_TEXT_WHITE),
-                ("rot_toggle", "ROT: ON" if self.config.ditoo_auto_rotation else "ROT: OFF", ui_scale.s(68), "#121A28", C_GREEN if self.config.ditoo_auto_rotation else C_TEXT_MUTED),
-            ]
-            for b_key, b_label, b_w, b_bg, b_fg in d_btns:
-                bx1 = curr_x
-                bx2 = bx1 + b_w
-                self.canvas.create_rectangle(bx1, y_top, bx2, y_top + btn_h, fill=b_bg, outline="#202A3C")
-                self.canvas.create_text((bx1 + bx2) // 2, y_top + btn_h // 2, text=b_label, font=ui_scale.f_btn, fill=b_fg, anchor="center")
-                self.ditoo_btn_bounds[b_key] = (bx1, y_top, bx2, y_top + btn_h)
-                curr_x += b_w + ui_scale.s(6)
-
-        # 4. Right-Side Utility Bar: Settings, Autostart, Creator View, Status Pill
-        set_w = ui_scale.s(96)
-        set_x2 = cur_w - margin
-        set_x1 = set_x2 - set_w
-        self.canvas.create_rectangle(set_x1, y_top, set_x2, y_top + btn_h, fill="#131B2A", outline="#25354F", width=1)
-        self.canvas.create_text(
-            (set_x1 + set_x2) // 2,
-            y_top + btn_h // 2,
-            text="⚙ SETTINGS",
-            font=ui_scale.f_btn,
-            fill=C_ACTIVE_CYAN,
-            anchor="center",
-        )
-        self.btn_bounds["settings"] = (set_x1, y_top, set_x2, y_top + btn_h)
-
-        # Autostart Toggle
-        auto_w = ui_scale.s(104)
-        auto_x2 = set_x1 - ui_scale.s(8)
-        auto_x1 = auto_x2 - auto_w
-        auto_text = "AUTO: ON" if self.autostart_enabled else "AUTO: OFF"
-        auto_fg = C_GREEN if self.autostart_enabled else C_TEXT_MUTED
-        auto_bg = "#0E2419" if self.autostart_enabled else "#151B27"
-        auto_border = "#1E4733" if self.autostart_enabled else "#253047"
-
-        self.canvas.create_rectangle(auto_x1, y_top, auto_x2, y_top + btn_h, fill=auto_bg, outline=auto_border, width=1)
-        self.canvas.create_text(
-            (auto_x1 + auto_x2) // 2,
-            y_top + btn_h // 2,
-            text=f"⚡ {auto_text}",
-            font=ui_scale.f_btn,
-            fill=auto_fg,
-            anchor="center",
-        )
-        self.btn_bounds["autostart"] = (auto_x1, y_top, auto_x2, y_top + btn_h)
-
-        # Creator View Button
-        creat_w = ui_scale.s(94)
-        creat_x2 = auto_x1 - ui_scale.s(8)
-        creat_x1 = creat_x2 - creat_w
-        self.canvas.create_rectangle(creat_x1, y_top, creat_x2, y_top + btn_h, fill="#1B1428", outline="#40255F", width=1)
-        self.canvas.create_text(
-            (creat_x1 + creat_x2) // 2,
-            y_top + btn_h // 2,
-            text="🎬 CREATOR",
-            font=ui_scale.f_btn,
-            fill=C_PURPLE,
-            anchor="center",
-        )
-        self.btn_bounds["creator_toggle"] = (creat_x1, y_top, creat_x2, y_top + btn_h)
-
-        # Connection Status Pill
-        if target == "ditoo":
-            conn = self.state.ditoo_connected
-            status_str = self.state.ditoo_status_text
-            pill_color = C_GREEN if conn else (C_AMBER if "RECONNECTING" in status_str else C_RED)
-            pill_bg = "#0D261B" if conn else ("#261D0D" if "RECONNECTING" in status_str else "#2A1111")
-            pill_border = "#1B4D36" if conn else ("#4D361B" if "RECONNECTING" in status_str else "#4D1B1B")
-        elif target == "preview":
-            conn = self.state.ditoo_connected or self.state.minitoo_connected
-            d_st = "DITOO ● " if self.state.ditoo_connected else "DITOO ○ "
-            m_st = "MINITOO ●" if self.state.minitoo_connected else "MINITOO ○"
-            status_str = f"DUAL: {d_st}| {m_st}"
-            pill_color = C_ACTIVE_CYAN if conn else C_AMBER
-            pill_bg = "#09222E"
-            pill_border = "#13495F"
-        else:
-            conn = self.state.minitoo_connected
-            status_str = self.state.minitoo_status_text
-            pill_color = C_GREEN if conn else C_AMBER
-            pill_bg = "#0D261B" if conn else "#261D0D"
-            pill_border = "#1B4D36" if conn else "#4D361B"
-
-        pill_w = ui_scale.s(138)
-        px2 = creat_x1 - ui_scale.s(10)
-        px1 = px2 - pill_w
-        if px1 > curr_x + ui_scale.s(10):
-            self.canvas.create_rectangle(px1, y_top, px2, y_top + btn_h, fill=pill_bg, outline=pill_border, width=1)
-            dot_r = ui_scale.s(3)
-            dot_cx = px1 + ui_scale.s(10)
-            dot_cy = y_top + btn_h // 2
-            self.canvas.create_oval(dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r, fill=pill_color, outline="")
-            self.canvas.create_text(
-                px1 + ui_scale.s(20),
-                y_top + btn_h // 2,
-                text=status_str[:22],
-                font=ui_scale.f_meta,
-                fill=pill_color,
-                anchor="w",
-            )
-
-        # Subtle divider under header
-        self.canvas.create_line(0, ui_scale.header_height, cur_w, ui_scale.header_height, fill="#151D2A", width=1)
-
-    # --------------------------------------------------------------------------
-    # CREATOR CAPTURE VIEW (Milestone 14 - Shorts / 16:9 Filming Surface)
-    # --------------------------------------------------------------------------
-    def _draw_creator_header(self, cur_w: int) -> int:
-        margin = ui_scale.grid_margin
-        btn_h = ui_scale.btn_h
-        y_top = ui_scale.s(12)
-
-        # Exit Button
-        ex_w = ui_scale.s(130)
-        self.canvas.create_rectangle(margin, y_top, margin + ex_w, y_top + btn_h, fill="#2B1414", outline=C_RED, width=1)
-        self.canvas.create_text(
-            margin + ex_w // 2,
-            y_top + btn_h // 2,
-            text="✕ EXIT CREATOR (Esc)",
-            font=ui_scale.f_btn,
-            fill=C_RED,
-            anchor="center",
-        )
-        self.creator_btn_bounds["exit"] = (margin, y_top, margin + ex_w, y_top + btn_h)
-
-        # Aspect Ratio Selector: 16:9 / 9:16 Shorts
-        ax = margin + ex_w + ui_scale.s(16)
-        self.canvas.create_text(ax, y_top + btn_h // 2, text="CAPTURE RATIO:", font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="w")
-        ax += ui_scale.s(96)
-
-        asp_16 = (self.creator_aspect == "16:9")
-        asp_9 = (self.creator_aspect == "9:16")
-
-        self.canvas.create_rectangle(ax, y_top, ax + ui_scale.s(64), y_top + btn_h, fill="#0B384A" if asp_16 else "#101622", outline=C_ACTIVE_CYAN if asp_16 else "#1C2536", width=2 if asp_16 else 1)
-        self.canvas.create_text(ax + ui_scale.s(32), y_top + btn_h // 2, text="16:9", font=ui_scale.f_btn, fill=C_ACTIVE_CYAN if asp_16 else C_TEXT_MUTED, anchor="center")
-        self.creator_btn_bounds["aspect_16_9"] = (ax, y_top, ax + ui_scale.s(64), y_top + btn_h)
-        ax += ui_scale.s(70)
-
-        self.canvas.create_rectangle(ax, y_top, ax + ui_scale.s(92), y_top + btn_h, fill="#0B384A" if asp_9 else "#101622", outline=C_ACTIVE_CYAN if asp_9 else "#1C2536", width=2 if asp_9 else 1)
-        self.canvas.create_text(ax + ui_scale.s(46), y_top + btn_h // 2, text="9:16 SHORTS", font=ui_scale.f_btn, fill=C_ACTIVE_CYAN if asp_9 else C_TEXT_MUTED, anchor="center")
-        self.creator_btn_bounds["aspect_9_16"] = (ax, y_top, ax + ui_scale.s(92), y_top + btn_h)
-        ax += ui_scale.s(102)
-
-        # Section Presets
-        self.canvas.create_text(ax, y_top + btn_h // 2, text="PRESET:", font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="w")
-        ax += ui_scale.s(52)
-        for p_name in ["ALL", "AI", "CRYPTO", "STOCKS", "SYSTEM"]:
-            is_active = (self.config.active_preset == p_name)
-            pw = ui_scale.s(56)
-            self.canvas.create_rectangle(ax, y_top, ax + pw, y_top + btn_h, fill="#0B384A" if is_active else "#101622", outline=C_ACTIVE_CYAN if is_active else "#1C2536", width=2 if is_active else 1)
-            self.canvas.create_text(ax + pw // 2, y_top + btn_h // 2, text=p_name, font=ui_scale.f_btn, fill=C_ACTIVE_CYAN if is_active else C_TEXT_MUTED, anchor="center")
-            self.creator_btn_bounds[f"preset_{p_name}"] = (ax, y_top, ax + pw, y_top + btn_h)
-            ax += pw + ui_scale.s(6)
-
-        # Subtle indicator line
-        sep_y = y_top + btn_h + ui_scale.s(10)
-        self.canvas.create_line(0, sep_y, cur_w, sep_y, fill="#1C2536", width=1)
-        return sep_y + ui_scale.s(12)
 
     def _draw_creator_view(self, curr_y: int, cur_w: int) -> int:
         preset = self.config.active_preset

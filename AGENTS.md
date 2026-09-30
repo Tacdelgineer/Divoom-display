@@ -158,6 +158,11 @@ pyinstaller "AI Desk Dashboard.spec"
     - Decouple background collector updates: background refreshes for inactive pages must never trigger MiniToo display transmissions.
     - Zero redundant frame transmissions: elide frames if pixel/payload hash matches the currently displayed buffer.
 
+11. **UI Interaction Invariant (High-DPI & Navigation Hit Targets)**:
+    - *"Visual position and interactive hit target must always derive from the same scaled geometry."*
+    - Navigation headers and desktop controls must use native interactive widgets (`tk.Button` with `command=` callbacks, hand cursors, and dynamic hover styling) pinned to persistent frames above scrollable viewports. Never mix raw viewport `(event.x, event.y)` hit detection with canvas-scrolled or DPI-scaled content, and never clear interactive geometry bindings during canvas redraws.
+    - Decouple device state from desktop controls: a disconnected or reconnecting peripheral (e.g., MiniToo or Ditoo) must never disable unrelated desktop controls (Settings, Creator mode, Presets).
+
 ---
 
 ## 7. Milestone Workflow for Agents
@@ -168,3 +173,11 @@ When assigned a task or feature in this repository:
 3. **Run Validation Checks**: Run Python compilation, unit tests, and terminal diagnostic checks.
 4. **Update Documentation**: Keep docs in sync with any schema or interface changes.
 5. **Stop**: Report results clearly and wait for user review before proceeding to subsequent milestones.
+
+### Milestone 14.1 Hotfix Regression Note
+- **Fixed Issue**: Top navigation buttons rendered visually on high-DPI screens but mouse clicks were swallowed or offset.
+- **Root Causes**:
+  1. Coordinate divergence: Buttons drawn on `self.canvas` with canvas coordinates were tested against raw window `(event.x, event.y)` without accounting for scroll offsets.
+  2. Canvas delete race: 350ms periodic `self.canvas.delete("all")` constantly wiped hit bounds dictionaries between clicks.
+  3. DPI coordinate collisions between left-growing and right-growing button bars.
+- **Solution**: Refactored header into a pinned `self.header_frame` above the canvas with native retro `tk.Button` controls, hand cursors, dynamic hover feedback, and direct `command=` callbacks. Fully decoupled device reconnect state from desktop navigation.

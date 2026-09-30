@@ -18,7 +18,9 @@
 
 ## ⚡ Highlights
 
-- **High-DPI Desktop Command Center (Milestone 14)**:
+- **High-DPI Desktop Command Center (Milestone 14 & 14.1 Hotfix)**:
+  - Fixed & pinned navigation header with native retro buttons, instant hand-cursor hover feedback, and guaranteed click dispatch across 100%, 125%, 150%, 175%, and 200% DPI scales.
+  - Generous header spacing with decoupled device reconnection: peripheral reconnections (MiniToo / Ditoo) never disable Settings, Creator view, or Presets.
   - True Windows **Per-Monitor-V2 DPI Awareness** (`SetProcessDpiAwarenessContext(-4)`), rendering razor-sharp text and graphics on 100%, 125%, 150%, 175%, and 200% display scaling without blurry OS bitmap virtualization.
   - Centralized **UI Scale Engine** (`ui_scale.py`) with user-selectable scaling: `AUTO`, `100%`, `125%`, `150%`, `175%`, `200%`.
   - Modern default command center geometry (**1240×780**), with full window state restoration (width, height, x/y position, maximized state).

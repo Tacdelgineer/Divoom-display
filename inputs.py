@@ -92,13 +92,12 @@ def parse_response(data: bytes) -> Optional[Tuple[int, bytes]]:
 class MiniTooInputAdapter(BaseInputAdapter):
     """
     Physical input adapter for Divoom MiniToo hardware controls.
-    Polls device state over Bluetooth SPP at ~10-12 Hz and maps
-    physical knob rotations to NEXT / PREV navigation.
-    
+    Polls device state over Bluetooth SPP and maps physical knob rotations to NEXT / PREV.
+
     Features:
-    - Remembers original base volume level and immediately restores it.
-    - Prevents audible sound change and preserves sound state.
-    - Debounces rapid knob pulses to ensure exactly 1 page transition per step.
+    - Default ~4 Hz polling in Normal mode, ~2.5 Hz in Low Interference mode (reduced from 16 Hz).
+    - Can disable knob polling completely to eliminate all background polling traffic.
+    - Tracks knob poll rates and channel check diagnostics for Bluetooth coexistence profiling.
     - Exposes its persistent serial connection to MiniTooDisplay for fast frame transfers.
     """
 
@@ -107,18 +106,64 @@ class MiniTooInputAdapter(BaseInputAdapter):
         port: Optional[str] = None,
         baudrate: int = 115200,
         debounce_secs: float = 0.25,
-        target_base_vol: int = 10,
+        target_base_vol: int = 8,
+        display: Optional[Any] = None,
+        knob_enabled: bool = True,
+        poll_rate: str = "AUTO",
+        bt_mode: str = "NORMAL",
     ):
         self.port = port or self.find_port()
         self.baudrate = baudrate
         self.debounce_secs = debounce_secs
-        self.target_base_vol = 8  # Middle of 0..16 scale for max headroom
-        self.current_base_vol: int = 8
+        self.target_base_vol = target_base_vol  # 8 is center for max headroom
+        self.current_base_vol: int = target_base_vol
+        self.display = display
+        self.knob_enabled = knob_enabled
         self.last_event_time: float = 0.0
         self.last_poll_time: float = 0.0
-        self.poll_interval: float = 0.06  # ~16 Hz responsiveness
+        self.poll_interval: float = 0.25  # ~4 Hz default
 
+        # Diagnostics counters
+        self.knob_polls_total: int = 0
+        self.channel_checks_total: int = 0
+        self._poll_history: list[float] = []
+        self._channel_history: list[float] = []
+
+        self.set_poll_rate(poll_rate, bt_mode)
         self._connect()
+
+    def set_poll_rate(self, rate_str: str = "AUTO", mode: str = "NORMAL"):
+        """Adjust poll interval dynamically."""
+        r = (rate_str or "AUTO").upper().strip()
+        if r == "2HZ":
+            self.poll_interval = 0.50
+        elif r == "3HZ":
+            self.poll_interval = 0.33
+        elif r == "4HZ":
+            self.poll_interval = 0.25
+        elif r == "5HZ":
+            self.poll_interval = 0.20
+        else:  # AUTO
+            if mode == "LOW_INTERFERENCE":
+                self.poll_interval = 0.35  # ~2.8 Hz
+            else:
+                self.poll_interval = 0.25  # ~4 Hz
+
+    def get_poll_diagnostics(self) -> dict[str, Any]:
+        """Return rolling knob poll and channel check rates."""
+        now = time.time()
+        cutoff_sec = now - 1.0
+        cutoff_min = now - 60.0
+        self._poll_history = [t for t in self._poll_history if t >= cutoff_sec]
+        self._channel_history = [t for t in self._channel_history if t >= cutoff_min]
+        return {
+            "knob_polls_per_sec": len(self._poll_history),
+            "channel_checks_per_min": len(self._channel_history),
+            "knob_polls_total": self.knob_polls_total,
+            "channel_checks_total": self.channel_checks_total,
+            "poll_interval": round(self.poll_interval, 3),
+            "knob_enabled": self.knob_enabled,
+        }
 
     @staticmethod
     def find_port() -> Optional[str]:
@@ -132,6 +177,10 @@ class MiniTooInputAdapter(BaseInputAdapter):
             pass
         return None
 
+    def _record_display_traffic(self, event_type: str, count: int = 1, byte_count: int = 0):
+        if self.display and hasattr(self.display, "record_traffic"):
+            self.display.record_traffic(event_type, count, byte_count)
+
     def _connect(self) -> bool:
         if serial is None or not self.port:
             return False
@@ -139,7 +188,8 @@ class MiniTooInputAdapter(BaseInputAdapter):
             self.ser = serial.Serial(self.port, self.baudrate, timeout=0.04)
             time.sleep(0.3)
             if self.ser.in_waiting:
-                self.ser.read(self.ser.in_waiting)
+                flushed = self.ser.read(self.ser.in_waiting)
+                self._record_display_traffic("read", 1, len(flushed))
 
             # Ensure device is in Custom/DIY Channel 5
             self.set_channel(5)
@@ -147,7 +197,7 @@ class MiniTooInputAdapter(BaseInputAdapter):
             # Center base volume to 8 for symmetric headroom (+8 / -8)
             self.set_vol(self.target_base_vol)
             self.current_base_vol = self.target_base_vol
-            print(f"[INPUT] Connected to MiniToo on {self.port} (Channel 5 active, Centered Base Vol: {self.current_base_vol})")
+            print(f"[INPUT] Connected to MiniToo on {self.port} (Channel 5 active, Centered Base Vol: {self.current_base_vol}, Poll Interval: {self.poll_interval}s)")
             return True
         except Exception as e:
             print(f"[INPUT] Warning: Could not open {self.port} for physical controls: {e}")
@@ -157,15 +207,22 @@ class MiniTooInputAdapter(BaseInputAdapter):
     def query_channel(self) -> Optional[int]:
         """Query current display channel (0xBD 0x13). Channel 5 = Custom/DIY."""
         if not self.ser or not self.ser.is_open:
-            raise serial.SerialException("Serial port is not open")
+            return None
         try:
-            self.ser.write(frame_spp(0xBD, bytes([0x13])))
+            cmd_pkt = frame_spp(0xBD, bytes([0x13]))
+            self.ser.write(cmd_pkt)
             self.ser.flush()
+            self._record_display_traffic("write", 1, len(cmd_pkt))
+            self.channel_checks_total += 1
+            self._channel_history.append(time.time())
+
             t0 = time.time()
             buf = bytearray()
             while time.time() - t0 < 0.08:
                 if self.ser.in_waiting:
-                    buf.extend(self.ser.read(self.ser.in_waiting))
+                    chunk = self.ser.read(self.ser.in_waiting)
+                    buf.extend(chunk)
+                    self._record_display_traffic("read", 1, len(chunk))
                     pkts = extract_packets(bytes(buf))
                     for cmd, body in pkts:
                         if cmd == 0xBD and len(body) >= 3 and body[0] == 0x13:
@@ -183,11 +240,14 @@ class MiniTooInputAdapter(BaseInputAdapter):
         if not self.ser or not self.ser.is_open:
             raise serial.SerialException("Serial port is not open")
         try:
-            self.ser.write(frame_spp(0x45, bytes([channel & 0xFF])))
+            cmd_pkt = frame_spp(0x45, bytes([channel & 0xFF]))
+            self.ser.write(cmd_pkt)
             self.ser.flush()
+            self._record_display_traffic("write", 1, len(cmd_pkt))
             time.sleep(0.02)
             if self.ser.in_waiting:
-                self.ser.read(self.ser.in_waiting)
+                chunk = self.ser.read(self.ser.in_waiting)
+                self._record_display_traffic("read", 1, len(chunk))
             return True
         except (serial.SerialException, OSError) as e:
             self.close()
@@ -200,13 +260,20 @@ class MiniTooInputAdapter(BaseInputAdapter):
         if not self.ser or not self.ser.is_open:
             raise serial.SerialException("Serial port is not open")
         try:
-            self.ser.write(frame_spp(0x09))
+            cmd_pkt = frame_spp(0x09)
+            self.ser.write(cmd_pkt)
             self.ser.flush()
+            self._record_display_traffic("write", 1, len(cmd_pkt))
+            self.knob_polls_total += 1
+            self._poll_history.append(time.time())
+
             t0 = time.time()
             buf = bytearray()
             while time.time() - t0 < 0.06:
                 if self.ser.in_waiting:
-                    buf.extend(self.ser.read(self.ser.in_waiting))
+                    chunk = self.ser.read(self.ser.in_waiting)
+                    buf.extend(chunk)
+                    self._record_display_traffic("read", 1, len(chunk))
                     pkts = extract_packets(bytes(buf))
                     for cmd, body in pkts:
                         if cmd == 0x09 and len(body) >= 1:
@@ -224,11 +291,14 @@ class MiniTooInputAdapter(BaseInputAdapter):
         if not self.ser or not self.ser.is_open:
             raise serial.SerialException("Serial port is not open")
         try:
-            self.ser.write(frame_spp(0x08, bytes([max(0, min(16, vol))])))
+            cmd_pkt = frame_spp(0x08, bytes([max(0, min(16, vol))]))
+            self.ser.write(cmd_pkt)
             self.ser.flush()
+            self._record_display_traffic("write", 1, len(cmd_pkt))
             time.sleep(0.01)
             if self.ser.in_waiting:
-                self.ser.read(self.ser.in_waiting)
+                chunk = self.ser.read(self.ser.in_waiting)
+                self._record_display_traffic("read", 1, len(chunk))
             return True
         except (serial.SerialException, OSError) as e:
             self.close()
@@ -241,13 +311,17 @@ class MiniTooInputAdapter(BaseInputAdapter):
         if not self.ser or not self.ser.is_open:
             raise serial.SerialException("Serial port is not open")
         try:
-            self.ser.write(frame_spp(0x13))
+            cmd_pkt = frame_spp(0x13)
+            self.ser.write(cmd_pkt)
             self.ser.flush()
+            self._record_display_traffic("write", 1, len(cmd_pkt))
             t0 = time.time()
             buf = bytearray()
             while time.time() - t0 < 0.06:
                 if self.ser.in_waiting:
-                    buf.extend(self.ser.read(self.ser.in_waiting))
+                    chunk = self.ser.read(self.ser.in_waiting)
+                    buf.extend(chunk)
+                    self._record_display_traffic("read", 1, len(chunk))
                     pkts = extract_packets(bytes(buf))
                     for cmd, body in pkts:
                         if cmd == 0x13 and len(body) >= 1:
@@ -260,13 +334,17 @@ class MiniTooInputAdapter(BaseInputAdapter):
             pass
         return None
 
+
     def poll_event(self) -> InputEvent:
         """
         Poll MiniToo hardware state for knob turns or button presses.
         Returns NEXT_PAGE, PREV_PAGE, TOGGLE_PAUSE, or NONE.
         """
+        if not self.knob_enabled:
+            return InputEvent.NONE
+
         if not self.ser or not self.ser.is_open:
-            raise serial.SerialException("Serial port is not open")
+            return InputEvent.NONE
 
         now = time.time()
         # Rate limit polling to ~16 Hz

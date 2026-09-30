@@ -10,7 +10,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6?style=flat-square&logo=windows)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Hardware](https://img.shields.io/badge/Hardware-Divoom%20MiniToo%20(Optional)-00F5D4?style=flat-square)](#supported-hardware)
-[![Version](https://img.shields.io/badge/Release-v0.2.0-orange?style=flat-square)](docs/RELEASE_NOTES_v0.1.0.md)
+[![Version](https://img.shields.io/badge/Release-v0.3.0-orange?style=flat-square)](docs/RELEASE_NOTES_v0.1.0.md)
 
 </div>
 
@@ -18,66 +18,79 @@
 
 ## ⚡ Highlights
 
-- **Multi-Device Hardware Controller**: Stream 160×128 pixel frames live to a **Divoom MiniToo** desk display over Bluetooth SPP, or stream dedicated 16×16 pixel art financial pages to a **Divoom Ditoo / Ditoo Plus** over direct BLE GATT (`DitooPro-Light`).
-- **Prominent Device Selector**: Instantly switch between **MiniToo**, **Ditoo (16x16)**, and side-by-side **Dual Preview** tabs directly from the header.
-- **Dedicated 16×16 Ditoo Pixel Controller**:
-  - **Crypto 3-Frame Cycles**: BTC, ETH, SOL, DOGE, PEPE individually toggleable with handcrafted 16×16 pixel art coin icons -> compact USD price -> 24h delta % with up/down directional markers.
-  - **Stock 3-Frame Cycles**: Configurable tickers (NVDA, TSLA, AAPL, MSFT, META default) with symbol banner -> current price -> daily % change, plus live Add/Remove/Reorder controls.
-  - **Custom Rotation Timing**: Configurable dwell intervals (default: 1.0s logo, 2.0s price, 2.0s delta), auto-rotation toggle, pause/resume, and hardware LED brightness adjustment.
-  - **Crisp Nearest-Neighbor Live Preview**: Real-time 160×160 preview mirroring exact pixels streamed over BLE with asset telemetry and market update timestamps.
-- **Audio Routing Isolation**: Communicates exclusively with the BLE pixel/control endpoint `DitooPro-Light`. Never touches, selects, or interferes with Windows audio routing or `DitooPro-Audio`.
-- **Automatic Reconnection & Offline Resilience**: Background BLE auto-reconnect engine automatically detects when the Ditoo returns and resumes rotation. Cached market data guarantees zero blank screens during API or network downtime.
-- **Windows Startup**: Optional "Start with Windows" setting via user registry (`HKCU\Run`), launching minimized without requiring administrator privileges.
-- **Configurable Sections & Presets**: Organize widgets into 4 modular sections (**CRYPTO**, **AI USAGE**, **SYSTEM**, **STOCKS**) with instant presets (**ALL**, **AI**, **MARKETS**, **SYSTEM**), full reordering, and visibility toggles.
-- **Top 10 Volatile Stocks Scanner**: Scans high-beta US equities and ranks the top 10 most volatile stocks today using an objective, measurable intraday range formula: `(high - low) / previous_close * 100`.
-- **AI Quota Tracking (% LEFT)**: Tracks live, authoritative quotas for **OpenAI Codex** and **Google Gemini / Antigravity**, enforcing strict `% LEFT` remaining semantics everywhere.
-- **Claude Multi-Account Diagnostics**: Identifies active Claude account (`no***@gmail.com`), subscription plan, auth type, probes environment variable precedence, and supports isolated secondary authentication directories.
-- **Physical Controls Investigation**: Rigorously documented BLE GATT telemetry showing Ditoo MCU firmware reserves mechanical keyboard/lever inputs internally for onboard clock/games, while dashboard UI provides comprehensive software controls.
+- **Redesigned 5-Tab Settings UX**: Clean, retro left-navigation layout (**GENERAL**, **DASHBOARD**, **MINITOO**, **INTEGRATIONS**, **ADVANCED**).
+- **Independent Desktop vs MiniToo Visibility**: Configure card visibility separately for the desktop application vs physical desk display (`BTC: Desktop [x] MiniToo [x]`, `Coding: Desktop [x] MiniToo [ ]`).
+- **Creator Presets & Focus Mode**:
+  - Instant top-bar presets: **ALL**, **AI**, **CRYPTO**, **STOCKS**, **SYSTEM** with visual active indication.
+  - **Focus Mode**: Click any section header's `[ 🔍 FOCUS ]` button to switch into a clean, enlarged hero view designed for screen recording, YouTube Shorts, and filming. Includes an obvious `[ ◀ BACK / ALL ]` escape banner.
+- **Bluetooth Coexistence Engine**:
+  - Solves real-world Bluetooth headphone and speaker audio stuttering caused by serial polling contention on shared radios (e.g., MediaTek RZ616 / Intel AX211).
+  - Selectable **NORMAL** vs **LOW INTERFERENCE** transport modes.
+  - Reduced knob polling from 16 Hz down to ~2.8–4 Hz; decoupled background collector refreshes from display transmissions; completely elides redundant identical frames (0 unnecessary transmissions).
+  - Live rolling 60-second telemetry: SPP writes/min, reads/min, frames/min, throughput (KB/min), reconnects, and error counts under **Settings → MiniToo**. See [docs/BLUETOOTH.md](docs/BLUETOOTH.md).
+- **Responsive Window Layout**: Smooth window resizing with sensible minimum dimensions (640×520), dynamic multi-column reflow, and zero text/card clipping.
+- **Top 10 Volatile Stocks Scanner**: Objective intraday high-low range ranking with live prices, percentage deltas, and Yahoo Finance / Finnhub crumb session backends.
+- **Authoritative AI Quotas (% LEFT)**: Tracks live, authoritative quotas for OpenAI Codex and Google Gemini / Antigravity with strict `% LEFT` semantics, plus Claude account diagnostic inspection (`no***@gmail.com`).
+- **Zero Console Flashing on Windows**: Subprocesses execute silently via `subproc.py` using `CREATE_NO_WINDOW = 0x08000000` and `SW_HIDE`.
 
 ---
 
 ## 📸 Screenshots
 
-### 1. Physical MiniToo Desk Display
-Running live Gemini model quota and remaining percentage on a physical Divoom MiniToo desk unit:
+### 1. Main Dashboard Overview (ALL Preset)
+The comprehensive desktop companion showing all 4 sections (Crypto Markets, AI Usage, Volatile Stocks Scanner, System & Services) with active MiniToo synchronization:
+
+<div align="center">
+  <img src="assets/screenshots/preset-all.png" alt="Desktop Dashboard ALL Preset" width="680" />
+</div>
+
+### 2. Crypto Hero Preset & Focus Mode
+Hero view featuring enlarged cards, live prices, and 24-point phosphor sparklines for BTC, ETH, SOL, DOGE, and PEPE:
+
+<div align="center">
+  <img src="assets/screenshots/preset-crypto.png" alt="Crypto Hero Preset" width="680" />
+</div>
+
+### 3. Stocks Volatility Scanner Preset
+Equities ranking emphasizing intraday volatility percentage, price, day change, and market session state:
+
+<div align="center">
+  <img src="assets/screenshots/preset-stocks.png" alt="Stocks Volatility Scanner Preset" width="680" />
+</div>
+
+### 4. AI Usage Preset (% LEFT & Reset Timers)
+Authoritative quota visualization showing percentage remaining, segmented progress bars, reset timers, and local AI activity daemons:
+
+<div align="center">
+  <img src="assets/screenshots/preset-ai.png" alt="AI Preset" width="680" />
+</div>
+
+### 5. System & Hardware Telemetry Preset
+Local RTX GPU monitoring, remote DGX Spark compute node load/VRAM, and internal service health checks:
+
+<div align="center">
+  <img src="assets/screenshots/preset-system.png" alt="System Hardware Preset" width="680" />
+</div>
+
+### 6. Redesigned Settings: Dashboard & Card Visibility
+Left-navigation layout with independent `Desktop [x]` vs `MiniToo [x]` toggles and per-item reordering arrows:
+
+<div align="center">
+  <img src="assets/screenshots/settings-dashboard.png" alt="Settings Dashboard Tab" width="680" />
+</div>
+
+### 7. Redesigned Settings: MiniToo & Bluetooth Telemetry
+Live 60-second rolling Bluetooth metrics, Low Interference mode toggle, dwell timing, and display diagnostics:
+
+<div align="center">
+  <img src="assets/screenshots/settings-minitoo.png" alt="Settings MiniToo Tab" width="680" />
+</div>
+
+### 8. Physical MiniToo Desk Display
+Live Gemini model quota running on a physical Divoom MiniToo 160×128 desk display:
 
 <div align="center">
   <img src="assets/screenshots/minitoo_desk_photo.png" alt="Physical Divoom MiniToo on Desk" width="460" />
-</div>
-
-### 2. Desktop Dashboard Overview (ALL Preset)
-The modular desktop companion showing all 4 sections (Crypto Markets, AI Usage, System, and Top 10 Volatile Stocks Scanner) with active MiniToo card synchronization:
-
-<div align="center">
-  <img src="assets/screenshots/06_preset_all_dashboard.png" alt="Desktop Dashboard ALL Preset" width="640" />
-</div>
-
-### 3. Markets Preset (Crypto + Stocks Scanner)
-Focused financial view featuring multi-asset crypto sparklines alongside the intraday stock volatility scanner:
-
-<div align="center">
-  <img src="assets/screenshots/07_preset_markets.png" alt="Markets Preset" width="640" />
-</div>
-
-### 4. AI Usage Preset (% LEFT)
-Authoritative quota visualization showing percentage remaining, segmented progress bars, and Claude account diagnostics:
-
-<div align="center">
-  <img src="assets/screenshots/08_preset_ai.png" alt="AI Preset" width="640" />
-</div>
-
-### 5. Multi-Asset Crypto Sparklines
-Spot price and 24-hour phosphor sparklines across major and micro-decimal tokens:
-
-<div align="center">
-  <img src="assets/screenshots/03_btc_sparkline.png" alt="Crypto Sparklines" width="420" />
-</div>
-
-### 6. GPU & Remote DGX Monitoring
-Local workstation RTX GPU metrics alongside remote DGX Spark compute node load, VRAM, and system memory:
-
-<div align="center">
-  <img src="assets/screenshots/04_gpu_and_dgx_monitoring.png" alt="Local PC and Remote DGX Monitoring" width="420" />
 </div>
 
 ---

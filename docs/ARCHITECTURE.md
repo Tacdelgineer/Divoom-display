@@ -78,14 +78,19 @@ class DashboardSectionConfig:
 The user configuration stores:
 - `section_order`: List of section IDs defining top-to-bottom rendering order.
 - `sections`: Map of section ID to `DashboardSectionConfig` (card order, enabled states).
-- `enabled_pages`: List of card keys enabled for physical MiniToo page rotation.
+- `enabled_cards`: Set of card keys enabled for the Desktop application.
+- `enabled_cards_minitoo`: Set of card keys enabled for physical MiniToo page rotation.
 
-### Presets
+### Presets & Focus Mode
 Presets allow instant focus switching without altering saved layouts:
 - **`[ ALL ]`**: Enables all 4 sections (`CRYPTO`, `AI USAGE`, `SYSTEM`, `STOCKS`).
 - **`[ AI ]`**: Enables `AI USAGE` and AI Activity.
-- **`[ MARKETS ]`**: Enables `CRYPTO` and `STOCKS`.
-- **`[ SYSTEM ]`**: Enables `SYSTEM` (Local PC, DGX Spark, Services, Coding).
+- **`[ CRYPTO ]`**: Focuses exclusively on cryptocurrency assets (`BTC`, `ETH`, `SOL`, `DOGE`, `PEPE`) with expanded sparklines.
+- **`[ STOCKS ]`**: Focuses on US equity market volatility rankings.
+- **`[ SYSTEM ]`**: Focuses on hardware cluster metrics (Local RTX GPU, remote DGX Spark, Services health, Coding workspace).
+
+#### Focus Mode (Creator / Shorts View)
+Clicking `[ 🔍 FOCUS ]` on any section header instantly switches the dashboard into an isolated, enlarged hero layout with high-resolution sparklines and prominent metrics. A prominent top banner provides an immediate `[ ◀ BACK / ALL ]` escape action.
 
 ### Adding a New Dashboard Section
 To add a new section in code:
@@ -259,16 +264,17 @@ Divoom MiniToo Hardware
 
 ## 8. Physical Knob Navigation Flow
 
-The MiniToo physical rotary knob does not transmit unsolicited keypresses over Bluetooth. AI Desk Dashboard navigates pages by polling device state at ~16 Hz:
+The MiniToo physical rotary knob does not transmit unsolicited keypresses over Bluetooth. AI Desk Dashboard navigates pages by polling device state at a low, radio-friendly frequency (~2.8 Hz in Low Interference, ~4.0 Hz in Normal mode, down from 16 Hz):
 
 ```
-MiniTooInputAdapter Loop (~16 Hz)
+MiniTooInputAdapter Loop (~2.8–4 Hz)
    │
-   │ 1. Queries device volume: Command 0x09
+   │ 1. Checks connection state (skips query immediately if disconnected)
+   │ 2. Queries device volume: Command 0x09
    ▼
 MiniToo Responds with Current Volume (0..16)
    │
-   │ 2. Compares volume with target base volume (8 / 16)
+   │ 3. Compares volume with target base volume (8 / 16)
    │
    ├── If volume > 8:
    │   - Knob was rotated CLOCKWISE
@@ -284,7 +290,8 @@ MiniToo Responds with Current Volume (0..16)
        - No knob movement; idle loop
 ```
 
-### Benefits of Base Restoration
+### Benefits of Base Restoration & Lower Polling
+- **Bluetooth Audio Coexistence**: Dropping knob queries from 16 Hz down to 2.8–4 Hz cuts serial Bluetooth packet contention by over 75%, preventing A2DP buffer starvation on Bluetooth speakers and headphones.
 - **Zero Audio Glitches**: Because the volume level is immediately restored to 8, no sudden volume jump occurs if an audio stream is playing.
 - **Infinite Rotation**: The knob acts as an infinite optical encoder without hitting firmware 0 or 16 endpoints.
 - **Hardware Debouncing**: Events are software-debounced with a 250ms window to guarantee exactly one page transition per physical knob detent.
@@ -295,8 +302,8 @@ MiniToo Responds with Current Volume (0..16)
 
 ```
 Main Thread (Tkinter GUI Loop)
-   ├── Renders Canvas (628x512) with scroll support
-   ├── Processes mouse clicks, window drag, presets, settings modals
+   ├── Renders Canvas (628x512 min, resizable) with scroll support
+   ├── Processes mouse clicks, window drag, presets, Focus mode, settings modals
    └── Receives state notifications via event callbacks
 
 DataEngine Thread (Daemon)
@@ -306,7 +313,44 @@ DataEngine Thread (Daemon)
 
 MiniTooController Thread (Daemon)
    ├── Manages serial connection to MiniToo
-   ├── Pushes active page frame when data changes or rotation triggers
-   └── MiniTooInputAdapter polls rotary knob events
+   ├── Decoupled: collector updates NEVER force frames unless current page changed
+   ├── Pushes active page frame ONLY when rendered image payload differs
+   └── MiniTooInputAdapter polls rotary knob events (~2.8–4 Hz)
 ```
 All shared state mutations in `DashboardState` are guarded by `threading.Lock`, guaranteeing thread-safe reads by the UI.
+
+---
+
+## 10. Bluetooth Coexistence & Traffic Reduction Engine
+
+### Root Cause of Bluetooth Audio Stutter
+Personal computers with integrated Wi-Fi + Bluetooth modules (e.g. MediaTek MT7922 / RZ616, Intel AX200/AX211) use a **single shared 2.4 GHz radio**. The radio controller divides time slots between:
+- **A2DP Audio Profile**: High-bitrate isochronous streaming packets with strict latency deadlines.
+- **RFCOMM SPP Profile**: Serial port command packets for device communication.
+
+When the host PC floods the serial link with 16 Hz volume polling (32 transactions/sec) + 8s channel checks + periodic frame heartbeats, the Bluetooth controller's TDD (Time-Division Duplex) scheduler starves A2DP audio packets, leading to audible clicks, pops, and audio dropouts.
+
+### Architectural Solution
+1. **Decoupled Collector Updates**:
+   When background collectors refresh (e.g., local GPU updates every 2 seconds, DGX every 10 seconds), they write to the central state cache. If the MiniToo display is showing BTC or Gemini, **zero bytes are transmitted over Bluetooth**. Only the actively displayed page is pushed.
+2. **Diff-Based Frame Elision**:
+   Every rendered frame is hashed. If the pixel/payload hash matches the currently displayed buffer, the frame send is elided completely. Retransmission heartbeats are eliminated.
+3. **Optimized Knob Polling**:
+   Lowered from 16 Hz to ~2.8 Hz in Low Interference mode (0.35s delay) and ~4.0 Hz in Normal mode (0.25s delay).
+4. **Relaxed Channel 5 Health Checks**:
+   Once display ownership is locked, Channel 5 queries run at 60-second (Normal) or 120-second (Low Interference) intervals.
+5. **Rolling 60-Second Telemetry Window**:
+   `RollingTelemetryWindow` in `backends.py` tracks exact rolling metrics: SPP writes/min, reads/min, frames/min, and throughput (KB/min) to diagnose radio contention.
+6. **Detailed Bluetooth Guide**:
+   See [docs/BLUETOOTH.md](BLUETOOTH.md) for full coexistence benchmarks and dedicated USB adapter routing strategies.
+
+---
+
+## 11. Redesigned Settings Architecture
+
+The Settings dialog (`ui_components.py`) uses a 5-tab left-navigation structure:
+- **GENERAL**: Launch minimized, Start with Windows, default preset, refresh behavior.
+- **DASHBOARD**: Section trees with per-card independent `Desktop [x]` vs `MiniToo [x]` toggles and dedicated `▲` / `▼` ordering buttons.
+- **MINITOO**: Connection port, transport mode selector (**NORMAL** vs **LOW INTERFERENCE**), auto-cycle toggle, dwell interval, live rolling telemetry display, and action buttons (`TEST DISPLAY`, `RECONNECT`, `COPY DIAGNOSTICS`).
+- **INTEGRATIONS**: Tailscale DGX node host, API keys, and Claude profile discovery.
+- **ADVANCED**: Debug logging, raw protocol inspector, and factory reset.

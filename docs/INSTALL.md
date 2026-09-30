@@ -24,12 +24,16 @@ If using the physical Divoom MiniToo display:
 5. The application automatically enumerates Bluetooth SPP serial ports and links to your MiniToo. The status in the header will switch to **MINITOO OK**.
 
 ### 3. Customize Your Dashboard
-- **Switch Presets**: Use the header buttons `[ ALL ]`, `[ AI ]`, `[ MARKETS ]`, `[ SYSTEM ]` for instant focus filtering.
-- **Section & Card Reordering**: Click the **GEAR** icon in the top-right corner to open Settings.
-- **Enable / Disable Sections**: Toggle entire groups (`CRYPTO`, `AI USAGE`, `SYSTEM`, `STOCKS`).
-- **Enable / Disable Cards**: Toggle individual widgets inside sections.
-- **Rotation Interval**: Adjust seconds per page for automatic MiniToo physical cycling.
-- **Start with Windows**: Enable to automatically launch the dashboard on system boot.
+- **Creator Presets**: Use header buttons `[ ALL ]`, `[ AI ]`, `[ CRYPTO ]`, `[ STOCKS ]`, `[ SYSTEM ]` for instant layout switching.
+- **Creator Focus Mode**: Click `[ 🔍 FOCUS ]` on any section header to film or view that section in a dedicated enlarged hero layout. Click `[ ◀ BACK / ALL ]` to return.
+- **Redesigned 5-Tab Settings**: Click the **⚙ SETTINGS** button in the header to open the categorized configuration modal:
+  - **GENERAL**: Windows startup (`HKCU\Run`), launch minimized, default startup preset, refresh behavior.
+  - **DASHBOARD**: Expandable section tree with independent **Desktop [x]** and **MiniToo [x]** toggles per card, plus dedicated `▲` / `▼` ordering buttons.
+  - **MINITOO**: Bluetooth connection status, transport mode (**NORMAL** vs **LOW INTERFERENCE**), auto-cycle toggle, dwell interval (seconds per page), knob toggle, poll rate, live rolling 60-second telemetry, and hardware action buttons (**TEST DISPLAY**, **RECONNECT**, **COPY DIAGNOSTICS**).
+  - **INTEGRATIONS**: Remote DGX Spark hostname/Tailscale IP, optional Finnhub API key, and Claude account profile discovery.
+  - **ADVANCED**: Protocol debug logs and diagnostic reporting.
+- **Bluetooth Headphones / Audio Coexistence**:
+  If your Bluetooth headphones or speakers experience audio stutters or drops while communicating with the MiniToo, set **Bluetooth Mode** to **LOW INTERFERENCE** under **Settings → MiniToo**. This throttles knob polling to ~2.8 Hz and elides redundant frame transfers, freeing 2.4 GHz radio airtime. For complete troubleshooting, see [docs/BLUETOOTH.md](BLUETOOTH.md).
 
 ---
 

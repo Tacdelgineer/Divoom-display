@@ -8,8 +8,8 @@
 ## 1. Project Purpose & Scope
 
 **AI Desk Dashboard** is a retro-styled dual-mode telemetry dashboard for developers:
-1. **Desktop Companion App**: A native Python Tkinter GUI with configurable sections (`CRYPTO`, `AI USAGE`, `SYSTEM`, `STOCKS`), presets (`ALL`, `AI`, `MARKETS`, `SYSTEM`), and full card/section ordering.
-2. **Physical Desk Display Controller**: Drives an external **Divoom MiniToo** 160×128 color IPS LCD over Bluetooth SPP in Custom Channel 5 with physical knob rotation control, multi-crypto views, and stock volatility rankings.
+1. **Desktop Companion App**: A native Python Tkinter GUI with configurable sections (`CRYPTO`, `AI USAGE`, `SYSTEM`, `STOCKS`), presets (`ALL`, `AI`, `CRYPTO`, `STOCKS`, `SYSTEM`), Focus Mode for screen recording / Shorts, 5-tab Settings redesign (`GENERAL`, `DASHBOARD`, `MINITOO`, `INTEGRATIONS`, `ADVANCED`), and independent Desktop vs MiniToo card visibility.
+2. **Physical Desk Display Controller**: Drives an external **Divoom MiniToo** 160×128 color IPS LCD over Bluetooth SPP in Custom Channel 5 with physical knob rotation control, multi-crypto views, stock volatility rankings, and Bluetooth audio coexistence optimization (Low Interference mode).
 
 ---
 
@@ -32,16 +32,19 @@
 │  engine.py (DataEngine, DashboardState, MiniTooController)  │
 │  - Schedules collectors at specific refresh rates           │
 │  - Maintains thread-safe page cache                         │
-│  - Handles MiniToo connection recovery                      │
+│  - Decoupled: collector updates NEVER force MiniToo frames  │
+│  - Eliminates redundant frames (diff hashing; 0 heartbeats) │
+│  - Manages Low Interference mode & rolling 60s telemetry    │
 └──────────────┬───────────────────────────────┬──────────────┘
                │                               │
                ▼                               ▼
 ┌──────────────────────────────┐ ┌────────────────────────────┐
 │       DESKTOP RENDERER       │ │      MINITOO RENDERER      │
 │  dashboard_app.py            │ │  renderer.py (Pillow)      │
-│  - Section-based Canvas      │ │  - 160x128 24-bit RGB JPEG │
-│  - Preset switching          │ │  - Multi-asset table / 128p│
-│  - Interactive card clicks   │ │  - Frame buffer payload    │
+│  - 5 Presets (ALL, AI, etc.) │ │  - 160x128 24-bit RGB JPEG │
+│  - Focus Mode (creator view) │ │  - Multi-asset table / 128p│
+│  - 5-tab SettingsDialog      │ │  - Frame buffer payload    │
+│  - Desktop vs MiniToo toggles│ │  - Page rotation engine    │
 └──────────────┬───────────────┘ └─────────────┬──────────────┘
                │                               │
                ▼                               ▼
@@ -49,8 +52,9 @@
 │      DESKTOP COMPANION       │ │     MINITOO BACKEND        │
 │      Windows GUI Window      │ │  backends.py · inputs.py   │
 │                              │ │  - Bluetooth SPP (0x8B)    │
-│                              │ │  - Channel 5 lock (0xBD)   │
+│                              │ │  - Channel 5 keep-alive    │
 │                              │ │  - Polled knob input (0x09)│
+│                              │ │  - Rolling 60s telemetry   │
 └──────────────────────────────┘ └────────────────────────────┘
 ```
 
@@ -60,8 +64,9 @@
 
 | File | Purpose | Critical Rules |
 | :--- | :--- | :--- |
-| `dashboard_app.py` | Main Desktop Companion application | Pure Tkinter; section layout; presets; canvas scroll support |
-| `engine.py` | Background scheduler & MiniToo controller | Thread-safe state container; auto-reconnects on device loss |
+| `dashboard_app.py` | Main Desktop Companion application | Pure Tkinter; resizable canvas; presets; Focus mode; card clicks |
+| `ui_components.py` | Redesigned 5-tab SettingsDialog | Left navigation; independent Desktop vs MiniToo card checkboxes |
+| `engine.py` | Background scheduler & MiniToo controller | Decoupled collector updates; 0 redundant frames; telemetry report |
 | `market_provider.py` | Stock quote & volatility provider abstraction | Pluggable interface; YahooFinance (free) & Finnhub; cached |
 | `collectors.py` | Data collectors (GPU, DGX, Multi-Crypto, Stocks, Git) | Consolidated requests; 60s caches; never block the UI thread |
 | `claude_usage.py` | Claude account diagnostics & profile reader | Safe masking (`no***@gmail.com`); env precedence; no token scraping |
@@ -69,8 +74,8 @@
 | `models.py` | Unified data structures (`PageData`, `CryptoAsset`, `StockQuote`) | Clean dataclasses; formatting helpers for micro-tokens |
 | `renderer.py` | Pixel-perfect 160×128 image generator | Pillow graphics; 8×10 tile alignment; multi-asset tables |
 | `detector.py` | Bluetooth SPP hardware discovery | Scores COM ports; safely probes `0xBD 0x13`; never hardcodes |
-| `inputs.py` | Physical rotary knob & button listener | Polls volume delta `0x09`; restores base volume; debounces |
-| `backends.py` | MiniToo frame transmission transport | Multi-packet SPP streaming `0x8B`; ACK timeout handling |
+| `inputs.py` | Physical rotary knob & button listener | ~2.8–4 Hz polling; stops queries if disconnected; debounces |
+| `backends.py` | MiniToo frame transmission transport | Multi-packet SPP streaming `0x8B`; rolling 60-second telemetry |
 | `config.py` | Persistent user configuration & section definitions | Stored in `%APPDATA%\AiDeskDashboard\config.json`; no secrets |
 | `subproc.py` | Silent subprocess execution helper | Always use `run_hidden()` / `check_output_hidden()` on Windows |
 
@@ -87,8 +92,10 @@
   - Payload: N bytes
   - Checksum: 2 bytes little-endian (sum of payload bytes `& 0xFFFF`)
   - End byte: `0x02`
-- **Display Channel Retention**: Query / set display mode `0xBD` to Channel 5 (Custom/DIY). This prevents the device firmware from reverting to Clock mode.
-- **Physical Controls**: The MiniToo does not emit unsolicited button packets. Knobs and buttons are read via high-frequency polled state queries (`0x09` volume level, `0x46` light mode). Rotary turns generate volume deltas, which are translated into NEXT / PREV page transitions and then immediately restored to the base volume level (`8/16`).
+- **Display Channel Retention**: Query / set display mode `0xBD` to Channel 5 (Custom/DIY). In Milestone 13, health checks are relaxed to 60s (Normal) / 120s (Low Interference) to minimize radio slot contention.
+- **Physical Controls**: The MiniToo does not emit unsolicited button packets. Polled via volume queries (`0x09`). In Milestone 13, polling frequency is capped at ~2.8 Hz (Low Interference) to 4 Hz (Normal), down from 16 Hz, freeing Bluetooth radio airtime for headphones and speakers.
+- **Diff-Based Frame Elision**: Never retransmits identical pixel frames on timer ticks. Frames are sent strictly when the active page changes, data materially updates, or reconnect requires restoring the screen. Redundant frame transmissions are 0.
+- **Bluetooth Coexistence**: Documented in `docs/BLUETOOTH.md`. Selectable `NORMAL` vs `LOW_INTERFERENCE` mode.
 
 ---
 
@@ -109,6 +116,9 @@ python -c "from detector import detect_minitoo_port; print(detect_minitoo_port()
 
 # Run tests
 pytest tests/ -v
+
+# Run physical Bluetooth coexistence benchmark script
+python scripts/test_bluetooth_coexistence.py
 
 # Build standalone Windows executable
 pyinstaller "AI Desk Dashboard.spec"
@@ -142,6 +152,10 @@ pyinstaller "AI Desk Dashboard.spec"
 9. **Safe Claude Multi-Account Handling**:
    - Claude Code CLI does not support simultaneous multi-account switching within a single profile folder.
    - Support multiple accounts *only* via isolated configuration directories (`CLAUDE_CONFIG_DIR`). Never scrape tokens, steal browser cookies, or hijack existing sessions.
+10. **Bluetooth Traffic Minimization & Audio Coexistence**:
+    - Never flood the serial connection with high-frequency control polls while audio is active.
+    - Decouple background collector updates: background refreshes for inactive pages must never trigger MiniToo display transmissions.
+    - Zero redundant frame transmissions: elide frames if pixel/payload hash matches the currently displayed buffer.
 
 ---
 

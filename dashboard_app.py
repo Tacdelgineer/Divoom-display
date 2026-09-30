@@ -37,6 +37,8 @@ from config import (
     ALL_PRESETS,
     PRESET_ALL,
     PRESET_AI,
+    PRESET_CRYPTO,
+    PRESET_STOCKS,
     PRESET_MARKETS,
     PRESET_SYSTEM,
 )
@@ -159,11 +161,13 @@ class DesktopDashboardApp:
         self.root = root
         self.root.title("AI Desk Dashboard")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
-        self.root.resizable(False, False)
+        self.root.minsize(640, 520)
+        self.root.resizable(True, True)
         self.root.configure(bg=C_BG)
 
         # 1. Load Persistent Configuration
         self.config = DashboardConfig.load()
+        self.focus_section: Optional[str] = getattr(self.config, "focus_section", None)
 
         if self.config.window_x is not None and self.config.window_y is not None:
             wx = max(10, min(self.config.window_x, 2560))
@@ -184,12 +188,14 @@ class DesktopDashboardApp:
         self.card_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self.preset_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self.btn_bounds: Dict[str, Tuple[int, int, int, int]] = {}
+        self.focus_btn_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self.device_tab_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self.ditoo_btn_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self.ditoo_crypto_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self.ditoo_stock_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self._ditoo_photo = None
         self._minitoo_photo = None
+        self._last_win_size: Optional[Tuple[int, int]] = None
 
         # 3. Build GUI Canvas with scroll support
         self.canvas = tk.Canvas(
@@ -231,6 +237,14 @@ class DesktopDashboardApp:
         ):
             self.root.after_idle(self._render_gui)
 
+    def _on_window_resize(self, event):
+        if event.widget == self.root:
+            if hasattr(self, "_last_win_size") and self._last_win_size:
+                if self._last_win_size == (event.width, event.height):
+                    return
+            self._last_win_size = (event.width, event.height)
+            self.root.after_idle(self._render_gui)
+
     def _on_mousewheel(self, event):
         self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
@@ -251,6 +265,7 @@ class DesktopDashboardApp:
             self.card_bounds,
             self.preset_bounds,
             self.btn_bounds,
+            self.focus_btn_bounds,
             self.device_tab_bounds,
             self.ditoo_btn_bounds,
             self.ditoo_crypto_bounds,
@@ -277,6 +292,29 @@ class DesktopDashboardApp:
         x, y = event.x, event.y
         canvas_x = self.canvas.canvasx(x)
         canvas_y = self.canvas.canvasy(y)
+
+        # 0. Focus Mode buttons
+        if "back_all" in self.focus_btn_bounds:
+            bx1, by1, bx2, by2 = self.focus_btn_bounds["back_all"]
+            if (bx1 <= canvas_x <= bx2 and by1 <= canvas_y <= by2) or (bx1 <= x <= bx2 and by1 <= y <= by2):
+                self.focus_section = None
+                self.config.focus_section = None
+                self.config.save()
+                self._render_gui()
+                return
+
+        for sec_id, (fx1, fy1, fx2, fy2) in self.focus_btn_bounds.items():
+            if sec_id != "back_all":
+                if (fx1 <= canvas_x <= fx2 and fy1 <= canvas_y <= fy2) or (fx1 <= x <= fx2 and fy1 <= y <= fy2):
+                    if self.focus_section == sec_id:
+                        self.focus_section = None
+                        self.config.focus_section = None
+                    else:
+                        self.focus_section = sec_id
+                        self.config.focus_section = sec_id
+                    self.config.save()
+                    self._render_gui()
+                    return
 
         # 1. Device Tab selector
         for dev_name, (dx1, dy1, dx2, dy2) in self.device_tab_bounds.items():
@@ -312,6 +350,8 @@ class DesktopDashboardApp:
             if bx1 <= x <= bx2 and by1 <= y <= by2:
                 print(f"[APP] Applying Preset: {p_name}")
                 self.config.apply_preset(p_name)
+                self.focus_section = None
+                self.config.focus_section = None
                 self.config.save()
                 self._render_gui()
                 return
@@ -415,10 +455,17 @@ class DesktopDashboardApp:
                     break
 
     def _open_settings(self):
-        SettingsDialog(self.root, self.config, on_save_callback=self._on_settings_saved)
+        SettingsDialog(
+            self.root,
+            self.config,
+            on_save_callback=self._on_settings_saved,
+            minitoo=self.minitoo,
+            state=self.state,
+        )
 
     def _on_settings_saved(self, new_config: DashboardConfig):
         self.config = new_config
+        self.focus_section = new_config.focus_section
         self.autostart_enabled = WindowsAutostart.is_enabled()
         self.engine.update_config(new_config)
         self.minitoo.update_config(new_config)
@@ -451,35 +498,42 @@ class DesktopDashboardApp:
     # RENDERING METHODS
     # ==========================================================================
     def _render_gui(self):
+        cur_w = self.canvas.winfo_width()
+        if cur_w < WINDOW_WIDTH:
+            cur_w = self.root.winfo_width()
+        if cur_w < WINDOW_WIDTH:
+            cur_w = WINDOW_WIDTH
+
         self.canvas.delete("all")
         self.card_bounds.clear()
         self.preset_bounds.clear()
         self.btn_bounds.clear()
+        self.focus_btn_bounds.clear()
         self.device_tab_bounds.clear()
         self.ditoo_btn_bounds.clear()
         self.ditoo_crypto_bounds.clear()
         self.ditoo_stock_bounds.clear()
 
-        # 1. Fixed Header Bar with Device Selector
-        self._draw_header()
+        # 1. Fixed Header Bar with Device Selector & Presets
+        self._draw_header(cur_w)
 
         # 2. Main Content View based on Selected Device
         curr_y = HEADER_HEIGHT + 6
         target = getattr(self.config, "target_device", "ditoo").lower()
 
         if target == "ditoo":
-            curr_y = self._draw_ditoo_panel(curr_y)
+            curr_y = self._draw_ditoo_panel(curr_y, cur_w)
         elif target == "preview":
-            curr_y = self._draw_dual_preview_panel(curr_y)
+            curr_y = self._draw_dual_preview_panel(curr_y, cur_w)
         else:
-            curr_y = self._draw_minitoo_sections(curr_y)
+            curr_y = self._draw_minitoo_sections(curr_y, cur_w)
 
         # 3. Footer Bar
-        self._draw_footer(curr_y)
+        self._draw_footer(curr_y, cur_w)
 
         # Update scrollregion
         max_scroll_y = max(WINDOW_HEIGHT, curr_y + FOOTER_HEIGHT + 10)
-        self.canvas.configure(scrollregion=(0, 0, WINDOW_WIDTH, max_scroll_y))
+        self.canvas.configure(scrollregion=(0, 0, cur_w, max_scroll_y))
 
         # Schedule next periodic refresh
         if hasattr(self, "_after_id") and self._after_id:
@@ -489,7 +543,7 @@ class DesktopDashboardApp:
                 pass
         self._after_id = self.root.after(250, self._render_gui)
 
-    def _draw_header(self):
+    def _draw_header(self, cur_w: int):
         target = getattr(self.config, "target_device", "ditoo").lower()
 
         # Line 1: Title & System Controls
@@ -502,7 +556,43 @@ class DesktopDashboardApp:
             anchor="w",
         )
 
-        # Device Connection Status Pill
+        # Settings Button (anchored right)
+        set_x2 = cur_w - GRID_MARGIN
+        set_x1 = cur_w - 92
+        set_y1 = 5
+        set_y2 = 27
+        self.canvas.create_rectangle(set_x1, set_y1, set_x2, set_y2, fill="#131B2A", outline="#25354F", width=1)
+        self.canvas.create_text(
+            (set_x1 + set_x2) // 2,
+            16,
+            text="⚙ SETTINGS",
+            font=("Consolas", 7, "bold"),
+            fill=C_ACTIVE_CYAN,
+            anchor="center",
+        )
+        self.btn_bounds["settings"] = (set_x1, set_y1, set_x2, set_y2)
+
+        # Autostart Button (anchored left of settings)
+        btn_x2 = set_x1 - 6
+        btn_x1 = btn_x2 - 100
+        btn_y1 = 5
+        btn_y2 = 27
+        auto_text = "AUTOSTART: ON" if self.autostart_enabled else "AUTOSTART: OFF"
+        auto_fg = C_GREEN if self.autostart_enabled else C_TEXT_MUTED
+        auto_bg = "#0E2419" if self.autostart_enabled else "#151B27"
+        auto_border = "#1E4733" if self.autostart_enabled else "#253047"
+        self.canvas.create_rectangle(btn_x1, btn_y1, btn_x2, btn_y2, fill=auto_bg, outline=auto_border, width=1)
+        self.canvas.create_text(
+            (btn_x1 + btn_x2) // 2,
+            16,
+            text=auto_text,
+            font=("Consolas", 7, "bold"),
+            fill=auto_fg,
+            anchor="center",
+        )
+        self.btn_bounds["autostart"] = (btn_x1, btn_y1, btn_x2, btn_y2)
+
+        # Device Connection Status Pill (responsive between title and autostart)
         if target == "ditoo":
             conn = self.state.ditoo_connected
             status_str = self.state.ditoo_status_text
@@ -526,7 +616,7 @@ class DesktopDashboardApp:
 
         px1 = 175
         py1 = 5
-        px2 = 430
+        px2 = min(btn_x1 - 8, 430)
         py2 = 27
         self.canvas.create_rectangle(px1, py1, px2, py2, fill=pill_bg, outline=pill_border, width=1)
         self.canvas.create_oval(px1 + 8, py1 + 7, px1 + 14, py1 + 13, fill=pill_color, outline="")
@@ -539,42 +629,6 @@ class DesktopDashboardApp:
             anchor="w",
         )
 
-        # Autostart Button
-        btn_x1 = 438
-        btn_y1 = 5
-        btn_x2 = 538
-        btn_y2 = 27
-        auto_text = "AUTOSTART: ON" if self.autostart_enabled else "AUTOSTART: OFF"
-        auto_fg = C_GREEN if self.autostart_enabled else C_TEXT_MUTED
-        auto_bg = "#0E2419" if self.autostart_enabled else "#151B27"
-        auto_border = "#1E4733" if self.autostart_enabled else "#253047"
-        self.canvas.create_rectangle(btn_x1, btn_y1, btn_x2, btn_y2, fill=auto_bg, outline=auto_border, width=1)
-        self.canvas.create_text(
-            (btn_x1 + btn_x2) // 2,
-            16,
-            text=auto_text,
-            font=("Consolas", 7, "bold"),
-            fill=auto_fg,
-            anchor="center",
-        )
-        self.btn_bounds["autostart"] = (btn_x1, btn_y1, btn_x2, btn_y2)
-
-        # Settings Button
-        set_x1 = 544
-        set_y1 = 5
-        set_x2 = 630
-        set_y2 = 27
-        self.canvas.create_rectangle(set_x1, set_y1, set_x2, set_y2, fill="#131B2A", outline="#25354F", width=1)
-        self.canvas.create_text(
-            (set_x1 + set_x2) // 2,
-            16,
-            text="⚙ SETTINGS",
-            font=("Consolas", 7, "bold"),
-            fill=C_ACTIVE_CYAN,
-            anchor="center",
-        )
-        self.btn_bounds["settings"] = (set_x1, set_y1, set_x2, set_y2)
-
         # Line 2: Prominent Display Device Selector Tabs
         self.canvas.create_text(
             GRID_MARGIN,
@@ -586,11 +640,11 @@ class DesktopDashboardApp:
         )
 
         tabs = [
-            ("minitoo", "🖥 MiniToo", 90),
-            ("ditoo", "👾 Ditoo (16x16)", 125),
-            ("preview", "👁 Preview", 90),
+            ("minitoo", "🖥 MiniToo", 82),
+            ("ditoo", "👾 Ditoo", 74),
+            ("preview", "👁 Dual", 66),
         ]
-        cur_tab_x = GRID_MARGIN + 52
+        cur_tab_x = GRID_MARGIN + 48
         for dev_key, dev_label, tab_w in tabs:
             is_active = (target == dev_key)
             t_bg = "#0B2638" if is_active else "#101622"
@@ -610,27 +664,41 @@ class DesktopDashboardApp:
                 anchor="center",
             )
             self.device_tab_bounds[dev_key] = (tx1, ty1, tx2, ty2)
-            cur_tab_x += tab_w + 6
+            cur_tab_x += tab_w + 5
 
-        # Line 2 Right Side: Context Action Buttons
-        if target == "minitoo":
+        # Line 2: Creator Presets (Visually Obvious, Instant switching)
+        if target != "ditoo":
             self.canvas.create_text(cur_tab_x + 8, 46, text="PRESET:", font=("Consolas", 7, "bold"), fill=C_TEXT_DIM, anchor="w")
             px = cur_tab_x + 58
+            preset_widths = {
+                "ALL": 36,
+                "AI": 32,
+                "CRYPTO": 52,
+                "STOCKS": 52,
+                "SYSTEM": 52,
+            }
             for p_name in ALL_PRESETS:
-                is_active = (self.config.active_preset == p_name)
-                p_bg = "#0B2638" if is_active else "#101622"
+                is_active = (self.config.active_preset == p_name and not self.focus_section)
+                p_bg = "#0B384A" if is_active else "#101622"
                 p_fg = C_ACTIVE_CYAN if is_active else C_TEXT_MUTED
                 p_border = C_ACTIVE_CYAN if is_active else "#1C2536"
-                pw = 50
+                pw = preset_widths.get(p_name, 48)
                 bx1, by1, bx2, by2 = px, 36, px + pw, 56
-                self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=p_bg, outline=p_border, width=1)
+                self.canvas.create_rectangle(bx1, by1, bx2, by2, fill=p_bg, outline=p_border, width=2 if is_active else 1)
                 self.canvas.create_text((bx1 + bx2) // 2, 46, text=p_name, font=("Consolas", 7, "bold"), fill=p_fg, anchor="center")
                 self.preset_bounds[p_name] = (bx1, by1, bx2, by2)
                 px += pw + 4
 
+            if self.focus_section:
+                ex_x1 = px + 4
+                ex_x2 = ex_x1 + 68
+                self.canvas.create_rectangle(ex_x1, 36, ex_x2, 56, fill="#2A1717", outline=C_RED, width=1)
+                self.canvas.create_text((ex_x1 + ex_x2) // 2, 46, text="✕ FOCUS", font=("Consolas", 7, "bold"), fill=C_RED, anchor="center")
+                self.focus_btn_bounds["back_all"] = (ex_x1, 36, ex_x2, 56)
+
         elif target == "ditoo":
             # Quick rotation playback buttons on header
-            px = 390
+            px = max(cur_tab_x + 8, cur_w - 240)
             # Prev
             self.canvas.create_rectangle(px, 36, px + 44, 56, fill="#121A28", outline="#202A3C")
             self.canvas.create_text(px + 22, 46, text="◀ PREV", font=("Consolas", 7, "bold"), fill=C_TEXT_WHITE, anchor="center")
@@ -663,13 +731,13 @@ class DesktopDashboardApp:
             self.ditoo_btn_bounds["rot_toggle"] = (px, 36, px + 56, 56)
 
         # Divider under header
-        self.canvas.create_line(0, HEADER_HEIGHT, WINDOW_WIDTH, HEADER_HEIGHT, fill="#151D2A", width=1)
+        self.canvas.create_line(0, HEADER_HEIGHT, cur_w, HEADER_HEIGHT, fill="#151D2A", width=1)
 
-    def _draw_ditoo_panel(self, curr_y: int) -> int:
+    def _draw_ditoo_panel(self, curr_y: int, cur_w: int = WINDOW_WIDTH) -> int:
         # 1. Hero Live Preview Card
         c1_x1 = GRID_MARGIN
         c1_y1 = curr_y
-        c1_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c1_x2 = cur_w - GRID_MARGIN
         c1_y2 = c1_y1 + 180
 
         self.canvas.create_rectangle(c1_x1, c1_y1, c1_x2, c1_y2, fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
@@ -742,7 +810,7 @@ class DesktopDashboardApp:
         # 2. Crypto Rotation Card
         c2_x1 = GRID_MARGIN
         c2_y1 = curr_y
-        c2_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c2_x2 = cur_w - GRID_MARGIN
         c2_y2 = c2_y1 + 76
 
         self.canvas.create_rectangle(c2_x1, c2_y1, c2_x2, c2_y2, fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
@@ -795,7 +863,7 @@ class DesktopDashboardApp:
         c3_h = 40 + max(1, len(tickers)) * 26 + 10
         c3_x1 = GRID_MARGIN
         c3_y1 = curr_y
-        c3_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c3_x2 = cur_w - GRID_MARGIN
         c3_y2 = c3_y1 + c3_h
 
         self.canvas.create_rectangle(c3_x1, c3_y1, c3_x2, c3_y2, fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
@@ -863,7 +931,7 @@ class DesktopDashboardApp:
         # 4. Rotation Timing & Dwell Settings Card
         c4_x1 = GRID_MARGIN
         c4_y1 = curr_y
-        c4_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c4_x2 = cur_w - GRID_MARGIN
         c4_y2 = c4_y1 + 70
 
         self.canvas.create_rectangle(c4_x1, c4_y1, c4_x2, c4_y2, fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
@@ -931,7 +999,7 @@ class DesktopDashboardApp:
         # 5. Device Architecture & Audio Isolation Note
         c5_x1 = GRID_MARGIN
         c5_y1 = curr_y
-        c5_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c5_x2 = cur_w - GRID_MARGIN
         c5_y2 = c5_y1 + 46
 
         self.canvas.create_rectangle(c5_x1, c5_y1, c5_x2, c5_y2, fill="#0A0F18", outline="#182232", width=1)
@@ -954,10 +1022,10 @@ class DesktopDashboardApp:
 
         return c5_y2 + GAP
 
-    def _draw_dual_preview_panel(self, curr_y: int) -> int:
+    def _draw_dual_preview_panel(self, curr_y: int, cur_w: int = WINDOW_WIDTH) -> int:
         c_x1 = GRID_MARGIN
         c_y1 = curr_y
-        c_x2 = WINDOW_WIDTH - GRID_MARGIN
+        c_x2 = cur_w - GRID_MARGIN
         c_y2 = c_y1 + 260
 
         self.canvas.create_rectangle(c_x1, c_y1, c_x2, c_y2, fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
@@ -1018,7 +1086,64 @@ class DesktopDashboardApp:
 
         return c_y2 + GAP
 
-    def _draw_minitoo_sections(self, curr_y: int) -> int:
+    def _draw_minitoo_sections(self, curr_y: int, cur_w: int) -> int:
+        if self.focus_section:
+            sec_id = self.focus_section
+            sec_title = SECTION_TITLES.get(sec_id, sec_id.upper())
+            sec_color = SECTION_COLORS.get(sec_id, C_ACTIVE_CYAN)
+
+            # Focus Mode Banner
+            b_x1 = GRID_MARGIN
+            b_y1 = curr_y
+            b_x2 = cur_w - GRID_MARGIN
+            b_y2 = b_y1 + 40
+
+            self.canvas.create_rectangle(b_x1, b_y1, b_x2, b_y2, fill="#0E1624", outline=C_ACTIVE_CYAN, width=1)
+
+            # Prominent Back / All Sections Button
+            back_x1 = b_x1 + 6
+            back_y1 = b_y1 + 6
+            back_x2 = back_x1 + 130
+            back_y2 = b_y2 - 6
+            self.canvas.create_rectangle(back_x1, back_y1, back_x2, back_y2, fill="#15263B", outline=C_ACTIVE_CYAN, width=1)
+            self.canvas.create_text(
+                (back_x1 + back_x2) // 2,
+                (back_y1 + back_y2) // 2,
+                text="◀ BACK / ALL",
+                font=("Consolas", 8, "bold"),
+                fill=C_ACTIVE_CYAN,
+                anchor="center",
+            )
+            self.focus_btn_bounds["back_all"] = (back_x1, back_y1, back_x2, back_y2)
+
+            self.canvas.create_text(
+                back_x2 + 16,
+                (b_y1 + b_y2) // 2,
+                text=f"FOCUS MODE: {sec_title}",
+                font=("Consolas", 10, "bold"),
+                fill=sec_color,
+                anchor="w",
+            )
+            self.canvas.create_text(
+                b_x2 - 12,
+                (b_y1 + b_y2) // 2,
+                text="CREATOR / FILMING LAYOUT · 9:16 & 16:9",
+                font=("Consolas", 7, "bold"),
+                fill=C_TEXT_DIM,
+                anchor="e",
+            )
+            curr_y = b_y2 + GAP + 2
+
+            if sec_id == SECTION_CRYPTO:
+                return self._draw_focus_crypto(curr_y, cur_w)
+            elif sec_id == SECTION_AI_USAGE:
+                return self._draw_focus_ai(curr_y, cur_w)
+            elif sec_id == SECTION_STOCKS:
+                return self._draw_focus_stocks(curr_y, cur_w)
+            elif sec_id == SECTION_SYSTEM:
+                return self._draw_focus_system(curr_y, cur_w)
+
+        # Standard Multi-Section View
         for sec_id in self.config.sections_order:
             if not self.config.enabled_sections.get(sec_id, True):
                 continue
@@ -1026,7 +1151,7 @@ class DesktopDashboardApp:
             sec_title = SECTION_TITLES.get(sec_id, sec_id.upper())
             sec_color = SECTION_COLORS.get(sec_id, C_TEXT_MUTED)
 
-            # Section Banner
+            # Section Banner with Focus button
             self.canvas.create_text(
                 GRID_MARGIN,
                 curr_y + 8,
@@ -1035,16 +1160,33 @@ class DesktopDashboardApp:
                 fill=sec_color,
                 anchor="w",
             )
+
+            # Dedicated Focus button beside section header
+            fx1 = GRID_MARGIN + 124
+            fy1 = curr_y - 1
+            fx2 = fx1 + 68
+            fy2 = curr_y + 17
+            self.canvas.create_rectangle(fx1, fy1, fx2, fy2, fill="#131B2A", outline="#25354F", width=1)
+            self.canvas.create_text(
+                (fx1 + fx2) // 2,
+                curr_y + 8,
+                text="[ 🔍 FOCUS ]",
+                font=("Consolas", 7, "bold"),
+                fill=C_ACTIVE_CYAN,
+                anchor="center",
+            )
+            self.focus_btn_bounds[sec_id] = (fx1, fy1, fx2, fy2)
+
             # Subtle trailing line across canvas
             self.canvas.create_line(
-                GRID_MARGIN + 140,
+                fx2 + 8,
                 curr_y + 8,
-                WINDOW_WIDTH - GRID_MARGIN,
+                cur_w - GRID_MARGIN,
                 curr_y + 8,
                 fill="#161F2E",
                 width=1,
             )
-            curr_y += 20
+            curr_y += 22
 
             # Cards in this section
             cards = [c for c in self.config.section_cards.get(sec_id, []) if self.config.enabled_cards.get(c, True)]
@@ -1060,11 +1202,11 @@ class DesktopDashboardApp:
                 curr_y += 32
                 continue
 
-            # Special layout for stocks scanner card: wide 2-column card
+            # Special layout for stocks scanner card: wide responsive card
             if sec_id == SECTION_STOCKS and "stocks_volatile" in cards:
                 sx1 = GRID_MARGIN
                 sy1 = curr_y
-                sx2 = WINDOW_WIDTH - GRID_MARGIN
+                sx2 = cur_w - GRID_MARGIN
                 sy2 = sy1 + 138
 
                 self.card_bounds["stocks_volatile"] = (sx1, sy1, sx2, sy2)
@@ -1077,13 +1219,16 @@ class DesktopDashboardApp:
                 curr_y = sy2 + GAP
                 continue
 
-            # Grid layout for standard cards (3 per row)
+            # Dynamic responsive grid layout for standard cards
+            num_cols = max(1, (cur_w - 2 * GRID_MARGIN + GAP) // (CARD_WIDTH + GAP))
+            card_w = (cur_w - 2 * GRID_MARGIN - (num_cols - 1) * GAP) // num_cols
+
             for idx, p_id in enumerate(cards):
-                col = idx % 3
-                row = idx // 3
-                cx1 = GRID_MARGIN + col * (CARD_WIDTH + GAP)
+                col = idx % num_cols
+                row = idx // num_cols
+                cx1 = GRID_MARGIN + col * (card_w + GAP)
                 cy1 = curr_y + row * (CARD_HEIGHT + GAP)
-                cx2 = cx1 + CARD_WIDTH
+                cx2 = cx1 + card_w
                 cy2 = cy1 + CARD_HEIGHT
 
                 self.card_bounds[p_id] = (cx1, cy1, cx2, cy2)
@@ -1094,15 +1239,371 @@ class DesktopDashboardApp:
 
                 self._draw_card(p_id, page_data, cx1, cy1, cx2, cy2, is_active, is_hover, is_enabled)
 
-            total_rows = (len(cards) + 2) // 3
+            total_rows = (len(cards) + num_cols - 1) // num_cols
             curr_y += total_rows * (CARD_HEIGHT + GAP) + 4
 
         return curr_y
 
-    def _draw_footer(self, curr_y: int):
+    # --------------------------------------------------------------------------
+    # CREATOR / FOCUS MODE RENDERERS (Optimized for filming & Shorts)
+    # --------------------------------------------------------------------------
+    def _draw_focus_crypto(self, curr_y: int, cur_w: int) -> int:
+        crypto_cards = ["btc", "eth", "sol", "doge", "pepe"]
+        cards = [c for c in self.config.section_cards.get(SECTION_CRYPTO, crypto_cards) if self.config.enabled_cards.get(c, True) and c != "crypto"]
+        if not cards:
+            cards = crypto_cards
+
+        num_cols = 2 if cur_w >= 540 else 1
+        card_w = (cur_w - 2 * GRID_MARGIN - (num_cols - 1) * GAP) // num_cols
+        card_h = 160
+
+        asset_titles = {
+            "btc": "BTC · BITCOIN",
+            "eth": "ETH · ETHEREUM",
+            "sol": "SOL · SOLANA",
+            "doge": "DOGE · DOGECOIN",
+            "pepe": "PEPE · PEPE",
+        }
+
+        for idx, p_id in enumerate(cards):
+            col = idx % num_cols
+            row = idx // num_cols
+            cx1 = GRID_MARGIN + col * (card_w + GAP)
+            cy1 = curr_y + row * (card_h + GAP)
+            cx2 = cx1 + card_w
+            cy2 = cy1 + card_h
+
+            self.card_bounds[p_id] = (cx1, cy1, cx2, cy2)
+            page_data = self.state.get_page(p_id)
+            is_active = (p_id == self.state.minitoo_active_page)
+            is_hover = (p_id == self.hovered_card)
+
+            border_c = C_ACTIVE_CYAN if is_active else (C_CARD_HOVER if is_hover else C_CARD_BORDER)
+            bg_c = "#121A2B" if is_active else ( "#141A28" if is_hover else C_CARD_BG )
+            self.canvas.create_rectangle(cx1, cy1, cx2, cy2, fill=bg_c, outline=border_c, width=2 if is_active else 1)
+
+            t_color = CARD_COLORS.get(p_id, C_GOLD)
+            t_text = asset_titles.get(p_id, p_id.upper())
+            self.canvas.create_text(cx1 + 10, cy1 + 14, text=t_text, font=("Consolas", 10, "bold"), fill=t_color, anchor="w")
+
+            if is_active:
+                self.canvas.create_rectangle(cx2 - 76, cy1 + 6, cx2 - 8, cy1 + 20, fill=C_ACTIVE_TAG_BG, outline=C_ACTIVE_CYAN)
+                self.canvas.create_text(cx2 - 42, cy1 + 13, text="ON MINITOO", font=("Consolas", 6, "bold"), fill=C_ACTIVE_CYAN, anchor="center")
+            else:
+                self.canvas.create_rectangle(cx2 - 58, cy1 + 6, cx2 - 8, cy1 + 20, fill="#131926", outline="#202A3C")
+                self.canvas.create_text(cx2 - 33, cy1 + 13, text="SPOT 24H", font=("Consolas", 6, "bold"), fill=C_TEXT_MUTED, anchor="center")
+
+            # Price & Delta
+            price_str = page_data.primary_metric.value if (page_data and page_data.primary_metric) else "N/A"
+            change_str = page_data.sparkline_change if page_data else ""
+            self.canvas.create_text(cx1 + 10, cy1 + 38, text=price_str, font=("Consolas", 15, "bold"), fill=t_color, anchor="w")
+
+            chg_c = C_GREEN if not change_str.startswith("-") else C_RED
+            self.canvas.create_text(cx2 - 10, cy1 + 38, text=change_str, font=("Consolas", 11, "bold"), fill=chg_c, anchor="e")
+
+            # High-res Sparkline
+            spark_data = page_data.sparkline_data if page_data else []
+            if spark_data and len(spark_data) >= 2:
+                sp_x1 = cx1 + 10
+                sp_y1 = cy1 + 56
+                sp_x2 = cx2 - 10
+                sp_y2 = cy1 + 124
+
+                mn = min(spark_data)
+                mx = max(spark_data)
+                span = (mx - mn) if mx != mn else 1.0
+
+                pts = []
+                for i, val in enumerate(spark_data):
+                    px = sp_x1 + i * ((sp_x2 - sp_x1) / (len(spark_data) - 1))
+                    py = sp_y2 - ((val - mn) / span) * (sp_y2 - sp_y1)
+                    pts.append((px, py))
+
+                for i in range(len(pts) - 1):
+                    self.canvas.create_line(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1], fill=t_color, width=2)
+                self.canvas.create_oval(pts[-1][0] - 2, pts[-1][1] - 2, pts[-1][0] + 2, pts[-1][1] + 2, fill=t_color, outline="")
+
+            hi = page_data.sparkline_high if page_data else ""
+            lo = page_data.sparkline_low if page_data else ""
+            self.canvas.create_text(cx1 + 10, cy2 - 12, text=f"24H HI: {hi}   LO: {lo}", font=("Consolas", 8), fill=C_TEXT_DIM, anchor="w")
+            self.canvas.create_text(cx2 - 10, cy2 - 12, text="COINGECKO SPOT", font=("Consolas", 7), fill=C_TEXT_DIM, anchor="e")
+
+        total_rows = (len(cards) + num_cols - 1) // num_cols
+        return curr_y + total_rows * (card_h + GAP) + 4
+
+    def _draw_focus_ai(self, curr_y: int, cur_w: int) -> int:
+        cards = [c for c in ["codex", "gemini", "claude", "ai_activity"] if self.config.enabled_cards.get(c, True)]
+        if not cards:
+            cards = ["codex", "gemini", "claude"]
+
+        num_cols = 2 if cur_w >= 540 else 1
+        card_w = (cur_w - 2 * GRID_MARGIN - (num_cols - 1) * GAP) // num_cols
+        card_h = 180
+
+        for idx, p_id in enumerate(cards):
+            col = idx % num_cols
+            row = idx // num_cols
+            cx1 = GRID_MARGIN + col * (card_w + GAP)
+            cy1 = curr_y + row * (card_h + GAP)
+            cx2 = cx1 + card_w
+            cy2 = cy1 + card_h
+
+            self.card_bounds[p_id] = (cx1, cy1, cx2, cy2)
+            page_data = self.state.get_page(p_id)
+            is_active = (p_id == self.state.minitoo_active_page)
+            is_hover = (p_id == self.hovered_card)
+
+            border_c = C_ACTIVE_CYAN if is_active else (C_CARD_HOVER if is_hover else C_CARD_BORDER)
+            bg_c = "#121A2B" if is_active else ( "#141A28" if is_hover else C_CARD_BG )
+            self.canvas.create_rectangle(cx1, cy1, cx2, cy2, fill=bg_c, outline=border_c, width=2 if is_active else 1)
+
+            t_color = CARD_COLORS.get(p_id, C_TEXT_WHITE)
+            title_str = page_data.title if page_data else p_id.upper()
+            self.canvas.create_text(cx1 + 10, cy1 + 14, text=title_str, font=("Consolas", 11, "bold"), fill=t_color, anchor="w")
+
+            if is_active:
+                self.canvas.create_rectangle(cx2 - 76, cy1 + 6, cx2 - 8, cy1 + 20, fill=C_ACTIVE_TAG_BG, outline=C_ACTIVE_CYAN)
+                self.canvas.create_text(cx2 - 42, cy1 + 13, text="ON MINITOO", font=("Consolas", 6, "bold"), fill=C_ACTIVE_CYAN, anchor="center")
+            elif page_data:
+                b_color = C_GREEN if page_data.badge_color == "green" else (C_AMBER if page_data.badge_color == "amber" else C_TEXT_MUTED)
+                self.canvas.create_rectangle(cx2 - 58, cy1 + 6, cx2 - 8, cy1 + 20, fill="#131926", outline="#202A3C")
+                self.canvas.create_text(cx2 - 33, cy1 + 13, text=page_data.badge[:10], font=("Consolas", 6, "bold"), fill=b_color, anchor="center")
+
+            if p_id in ("codex", "gemini", "claude"):
+                pm = page_data.primary_metric if page_data else None
+                sm = page_data.secondary_metric if page_data else None
+
+                p_pct = pm.remaining_pct if (pm and pm.remaining_pct is not None) else (pm.pct if pm else None)
+                if p_pct is not None:
+                    p_text = f"{int(p_pct)}% LEFT"
+                    p_col = C_GREEN if p_pct >= 30 else (C_AMBER if p_pct >= 15 else C_RED)
+                elif pm and pm.value and pm.value != "N/A":
+                    p_text = pm.value
+                    p_col = C_GREEN
+                else:
+                    p_text = "N/A"
+                    p_col = C_TEXT_DIM
+
+                p_label = pm.label if pm else "PRIMARY LIMIT"
+                self.canvas.create_text(cx1 + 10, cy1 + 36, text=p_label, font=("Consolas", 8, "bold"), fill=C_TEXT_MUTED, anchor="w")
+                self.canvas.create_text(cx2 - 10, cy1 + 36, text=p_text, font=("Consolas", 15, "bold"), fill=p_col, anchor="e")
+                self._draw_segmented_bar(cx1 + 10, cy1 + 48, card_w - 20, 7, p_pct, p_col, num_blocks=12)
+                p_reset = pm.reset if (pm and pm.reset) else "RESET N/A"
+                self.canvas.create_text(cx1 + 10, cy1 + 64, text=p_reset, font=("Consolas", 7), fill=C_TEXT_DIM, anchor="w")
+
+                s_pct = sm.remaining_pct if (sm and sm.remaining_pct is not None) else (sm.pct if sm else None)
+                if s_pct is not None:
+                    s_text = f"{int(s_pct)}% LEFT"
+                    s_col = C_GREEN if s_pct >= 30 else (C_AMBER if s_pct >= 15 else C_RED)
+                elif sm and sm.value and sm.value != "N/A":
+                    s_text = sm.value
+                    s_col = C_GREEN
+                else:
+                    s_text = "N/A"
+                    s_col = C_TEXT_DIM
+
+                s_label = sm.label if sm else "WEEKLY LIMIT"
+                self.canvas.create_text(cx1 + 10, cy1 + 84, text=s_label, font=("Consolas", 8, "bold"), fill=C_TEXT_MUTED, anchor="w")
+                self.canvas.create_text(cx2 - 10, cy1 + 84, text=s_text, font=("Consolas", 12, "bold"), fill=s_col, anchor="e")
+                self._draw_segmented_bar(cx1 + 10, cy1 + 96, card_w - 20, 6, s_pct, s_col, num_blocks=12)
+                s_reset = sm.reset if (sm and sm.reset) else "RESET N/A"
+                self.canvas.create_text(cx1 + 10, cy1 + 112, text=s_reset, font=("Consolas", 7), fill=C_TEXT_DIM, anchor="w")
+
+                if p_id == "claude" and page_data and page_data.extra_metrics:
+                    acc_info = page_data.extra_metrics[0].value if page_data.extra_metrics else ""
+                    self.canvas.create_text(cx1 + 10, cy2 - 12, text=f"{acc_info} · {page_data.footer_right}", font=("Consolas", 7), fill=C_TEXT_MUTED, anchor="w")
+                elif page_data:
+                    self.canvas.create_text(cx1 + 10, cy2 - 12, text=page_data.footer_right or "AI TELEMETRY", font=("Consolas", 7), fill=C_TEXT_MUTED, anchor="w")
+
+            elif p_id == "ai_activity":
+                items = page_data.items_list if page_data else []
+                for i_idx, it in enumerate(items[:4]):
+                    iy = cy1 + 36 + i_idx * 26
+                    name = it.get("name", "AGENT")
+                    working = it.get("working", False)
+                    elapsed = it.get("elapsed", "")
+
+                    dot_c = C_GREEN if working else C_TEXT_DIM
+                    stat_t = "WORKING" if working else "IDLE"
+
+                    self.canvas.create_oval(cx1 + 10, iy + 4, cx1 + 18, iy + 12, fill=dot_c, outline="")
+                    self.canvas.create_text(cx1 + 24, iy + 8, text=name[:14], font=("Consolas", 9, "bold"), fill=C_TEXT_WHITE, anchor="w")
+                    self.canvas.create_text(cx2 - 10, iy + 8, text=stat_t, font=("Consolas", 8, "bold"), fill=dot_c, anchor="e")
+                    if working and elapsed:
+                        self.canvas.create_text(cx1 + 24, iy + 20, text=f"active {elapsed.lower()}", font=("Consolas", 7), fill=C_TEXT_DIM, anchor="w")
+
+                self.canvas.create_text(cx1 + 10, cy2 - 12, text="AGENT POOL / LOCAL DAEMONS", font=("Consolas", 7), fill=C_TEXT_MUTED, anchor="w")
+
+        total_rows = (len(cards) + num_cols - 1) // num_cols
+        return curr_y + total_rows * (card_h + GAP) + 4
+
+    def _draw_focus_stocks(self, curr_y: int, cur_w: int) -> int:
+        sx1 = GRID_MARGIN
+        sy1 = curr_y
+        sx2 = cur_w - GRID_MARGIN
+        sy2 = sy1 + 250
+
+        self.card_bounds["stocks_volatile"] = (sx1, sy1, sx2, sy2)
+        page_data = self.state.get_page("stocks_volatile")
+        is_active = ("stocks_volatile" == self.state.minitoo_active_page)
+        is_hover = ("stocks_volatile" == self.hovered_card)
+
+        border_c = C_ACTIVE_CYAN if is_active else (C_CARD_HOVER if is_hover else C_CARD_BORDER)
+        bg_c = "#121A2B" if is_active else C_CARD_BG
+        self.canvas.create_rectangle(sx1, sy1, sx2, sy2, fill=bg_c, outline=border_c, width=2 if is_active else 1)
+
+        self.canvas.create_text(sx1 + 12, sy1 + 16, text="TOP 10 MOST VOLATILE US STOCKS TODAY", font=("Consolas", 11, "bold"), fill=C_ACTIVE_CYAN, anchor="w")
+
+        mkt_badge = page_data.badge if page_data else "REGULAR"
+        b_c = C_GREEN if "OPEN" in mkt_badge or "REG" in mkt_badge else C_AMBER
+        self.canvas.create_rectangle(sx2 - 76, sy1 + 8, sx2 - 10, sy1 + 24, fill="#131926", outline="#202A3C")
+        self.canvas.create_text(sx2 - 43, sy1 + 16, text=mkt_badge, font=("Consolas", 7, "bold"), fill=b_c, anchor="center")
+
+        quotes = page_data.stocks_data if page_data else []
+        if not quotes:
+            self.canvas.create_text((sx1 + sx2) // 2, (sy1 + sy2) // 2, text="COLLECTING MARKET VOLATILITY...", font=("Consolas", 9), fill=C_TEXT_DIM, anchor="center")
+            return sy2 + GAP
+
+        mid_x = (sx1 + sx2) // 2
+
+        # Left Column: 1-5
+        for idx, q in enumerate(quotes[:5]):
+            ry = sy1 + 42 + idx * 24
+            chg_c = C_GREEN if q.change_pct >= 0 else C_RED
+            self.canvas.create_text(sx1 + 12, ry, text=f"#{idx+1}", font=("Consolas", 8, "bold"), fill=C_TEXT_DIM, anchor="w")
+            self.canvas.create_text(sx1 + 34, ry, text=q.symbol, font=("Consolas", 9, "bold"), fill=C_TEXT_WHITE, anchor="w")
+            self.canvas.create_text(sx1 + 92, ry, text=f"${q.price:,.2f}", font=("Consolas", 8), fill=C_TEXT_MUTED, anchor="w")
+            self.canvas.create_text(sx1 + 180, ry, text=f"{q.change_pct:+.1f}%", font=("Consolas", 8, "bold"), fill=chg_c, anchor="e")
+            self.canvas.create_text(mid_x - 16, ry, text=f"VOL {q.volatility_pct:.1f}%", font=("Consolas", 8, "bold"), fill=C_ACTIVE_CYAN, anchor="e")
+
+        self.canvas.create_line(mid_x, sy1 + 34, mid_x, sy2 - 24, fill="#1A2436", width=1)
+
+        # Right Column: 6-10
+        for idx, q in enumerate(quotes[5:10]):
+            ry = sy1 + 42 + idx * 24
+            chg_c = C_GREEN if q.change_pct >= 0 else C_RED
+            self.canvas.create_text(mid_x + 16, ry, text=f"#{idx+6}", font=("Consolas", 8, "bold"), fill=C_TEXT_DIM, anchor="w")
+            self.canvas.create_text(mid_x + 38, ry, text=q.symbol, font=("Consolas", 9, "bold"), fill=C_TEXT_WHITE, anchor="w")
+            self.canvas.create_text(mid_x + 96, ry, text=f"${q.price:,.2f}", font=("Consolas", 8), fill=C_TEXT_MUTED, anchor="w")
+            self.canvas.create_text(mid_x + 184, ry, text=f"{q.change_pct:+.1f}%", font=("Consolas", 8, "bold"), fill=chg_c, anchor="e")
+            self.canvas.create_text(sx2 - 16, ry, text=f"VOL {q.volatility_pct:.1f}%", font=("Consolas", 8, "bold"), fill=C_ACTIVE_CYAN, anchor="e")
+
+        footer_str = "METRIC: Intraday Range % = (High - Low) / PrevClose · YahooFinance Live Quotes"
+        self.canvas.create_text(sx1 + 12, sy2 - 12, text=footer_str, font=("Consolas", 7), fill=C_TEXT_DIM, anchor="w")
+        return sy2 + GAP
+
+    def _draw_focus_system(self, curr_y: int, cur_w: int) -> int:
+        cards = [c for c in ["local_pc", "dgx_spark", "services", "coding"] if self.config.enabled_cards.get(c, True)]
+        if not cards:
+            cards = ["local_pc", "dgx_spark", "services", "coding"]
+
+        num_cols = 2 if cur_w >= 540 else 1
+        card_w = (cur_w - 2 * GRID_MARGIN - (num_cols - 1) * GAP) // num_cols
+        card_h = 180
+
+        for idx, p_id in enumerate(cards):
+            col = idx % num_cols
+            row = idx // num_cols
+            cx1 = GRID_MARGIN + col * (card_w + GAP)
+            cy1 = curr_y + row * (card_h + GAP)
+            cx2 = cx1 + card_w
+            cy2 = cy1 + card_h
+
+            self.card_bounds[p_id] = (cx1, cy1, cx2, cy2)
+            page_data = self.state.get_page(p_id)
+            is_active = (p_id == self.state.minitoo_active_page)
+            is_hover = (p_id == self.hovered_card)
+
+            border_c = C_ACTIVE_CYAN if is_active else (C_CARD_HOVER if is_hover else C_CARD_BORDER)
+            bg_c = "#121A2B" if is_active else ( "#141A28" if is_hover else C_CARD_BG )
+            self.canvas.create_rectangle(cx1, cy1, cx2, cy2, fill=bg_c, outline=border_c, width=2 if is_active else 1)
+
+            t_color = CARD_COLORS.get(p_id, C_TEXT_WHITE)
+            title_str = page_data.title if page_data else p_id.upper()
+            self.canvas.create_text(cx1 + 10, cy1 + 14, text=title_str, font=("Consolas", 11, "bold"), fill=t_color, anchor="w")
+
+            if is_active:
+                self.canvas.create_rectangle(cx2 - 76, cy1 + 6, cx2 - 8, cy1 + 20, fill=C_ACTIVE_TAG_BG, outline=C_ACTIVE_CYAN)
+                self.canvas.create_text(cx2 - 42, cy1 + 13, text="ON MINITOO", font=("Consolas", 6, "bold"), fill=C_ACTIVE_CYAN, anchor="center")
+            elif page_data:
+                b_color = C_GREEN if page_data.badge_color == "green" else (C_AMBER if page_data.badge_color == "amber" else C_TEXT_MUTED)
+                self.canvas.create_rectangle(cx2 - 58, cy1 + 6, cx2 - 8, cy1 + 20, fill="#131926", outline="#202A3C")
+                self.canvas.create_text(cx2 - 33, cy1 + 13, text=page_data.badge[:10], font=("Consolas", 6, "bold"), fill=b_color, anchor="center")
+
+            if p_id == "local_pc" and page_data:
+                pm = page_data.primary_metric
+                sm = page_data.secondary_metric
+                em = page_data.extra_metrics[0] if page_data.extra_metrics else None
+
+                gpu_val = pm.value if pm else "N/A"
+                gpu_pct = pm.pct if pm else None
+                gpu_c = C_RED if (gpu_pct and gpu_pct >= 90) else (C_AMBER if (gpu_pct and gpu_pct >= 75) else C_GREEN)
+                self.canvas.create_text(cx1 + 10, cy1 + 36, text="GPU LOAD", font=("Consolas", 8, "bold"), fill=C_TEXT_MUTED, anchor="w")
+                self.canvas.create_text(cx2 - 10, cy1 + 36, text=gpu_val, font=("Consolas", 11, "bold"), fill=gpu_c, anchor="e")
+                self._draw_segmented_bar(cx1 + 10, cy1 + 48, card_w - 20, 7, gpu_pct, gpu_c, num_blocks=12)
+
+                ram_val = sm.value if sm else "N/A"
+                ram_pct = sm.pct if sm else None
+                ram_c = C_RED if (ram_pct and ram_pct >= 90) else (C_AMBER if (ram_pct and ram_pct >= 75) else "#37C3F5")
+                self.canvas.create_text(cx1 + 10, cy1 + 78, text="SYSTEM RAM", font=("Consolas", 8, "bold"), fill=C_TEXT_MUTED, anchor="w")
+                self.canvas.create_text(cx2 - 10, cy1 + 78, text=ram_val, font=("Consolas", 11, "bold"), fill=ram_c, anchor="e")
+                self._draw_segmented_bar(cx1 + 10, cy1 + 90, card_w - 20, 6, ram_pct, ram_c, num_blocks=12)
+
+                cpu_val = em.value if em else "N/A"
+                self.canvas.create_text(cx1 + 10, cy1 + 116, text=f"CPU: {cpu_val}", font=("Consolas", 8), fill=C_TEXT_WHITE, anchor="w")
+                self.canvas.create_text(cx1 + 10, cy2 - 12, text=page_data.footer_right or "WORKSTATION HARDWARE", font=("Consolas", 7), fill=C_TEXT_DIM, anchor="w")
+
+            elif p_id == "dgx_spark" and page_data:
+                if page_data.is_offline:
+                    self.canvas.create_text((cx1 + cx2) // 2, cy1 + 60, text="OFFLINE", font=("Consolas", 16, "bold"), fill=C_RED, anchor="center")
+                    self.canvas.create_text((cx1 + cx2) // 2, cy1 + 90, text=f"LAST SEEN: {page_data.offline_sub or 'N/A'}", font=("Consolas", 8), fill=C_AMBER, anchor="center")
+                    self.canvas.create_text(cx1 + 10, cy2 - 12, text=f"ssh://{self.config.dgx_host}", font=("Consolas", 7), fill=C_TEXT_DIM, anchor="w")
+                else:
+                    pm = page_data.primary_metric
+                    gpu_val = pm.value if pm else "N/A"
+                    gpu_pct = pm.pct if pm else None
+                    self.canvas.create_text(cx1 + 10, cy1 + 36, text="DGX GPU LOAD", font=("Consolas", 8, "bold"), fill=C_TEXT_MUTED, anchor="w")
+                    self.canvas.create_text(cx2 - 10, cy1 + 36, text=gpu_val, font=("Consolas", 11, "bold"), fill="#76B900", anchor="e")
+                    self._draw_segmented_bar(cx1 + 10, cy1 + 50, card_w - 20, 8, gpu_pct, "#76B900", num_blocks=12)
+                    self.canvas.create_text(cx1 + 10, cy2 - 12, text="NVIDIA DGX SPARK · CLUSTER", font=("Consolas", 7), fill=C_TEXT_DIM, anchor="w")
+
+            elif p_id == "services" and page_data:
+                items = page_data.items_list or []
+                for s_idx, it in enumerate(items[:5]):
+                    sy = cy1 + 36 + s_idx * 20
+                    s_name = it.get("name", "SERVICE")
+                    online = it.get("online", False)
+                    dot_c = C_GREEN if online else C_TEXT_DIM
+                    st_text = "OK" if online else "OFF"
+                    self.canvas.create_oval(cx1 + 10, sy + 3, cx1 + 16, sy + 9, fill=dot_c, outline="")
+                    self.canvas.create_text(cx1 + 22, sy + 6, text=s_name[:16], font=("Consolas", 8), fill=C_TEXT_WHITE, anchor="w")
+                    self.canvas.create_text(cx2 - 10, sy + 6, text=st_text, font=("Consolas", 8, "bold"), fill=dot_c, anchor="e")
+                self.canvas.create_text(cx1 + 10, cy2 - 12, text="CORE SYSTEM DAEMONS", font=("Consolas", 7), fill=C_TEXT_DIM, anchor="w")
+
+            elif p_id == "coding" and page_data:
+                pm = page_data.primary_metric
+                sm = page_data.secondary_metric
+                em = page_data.extra_metrics[0] if page_data.extra_metrics else None
+
+                repo_val = pm.value if pm else "claude-minitoo"
+                branch_val = sm.value if sm else "main"
+                state_val = sm.reset if (sm and sm.reset) else "CLEAN"
+                model_val = em.value if em else "Claude 3.7 Sonnet"
+
+                self.canvas.create_text(cx1 + 10, cy1 + 38, text=f"REPO: {repo_val}", font=("Consolas", 9, "bold"), fill="#37C3F5", anchor="w")
+                self.canvas.create_text(cx1 + 10, cy1 + 62, text=f"BRANCH: {branch_val}", font=("Consolas", 8, "bold"), fill=C_TEXT_WHITE, anchor="w")
+                st_color = C_GREEN if "CLEAN" in state_val else C_AMBER
+                self.canvas.create_text(cx2 - 10, cy1 + 62, text=state_val, font=("Consolas", 8, "bold"), fill=st_color, anchor="e")
+                self.canvas.create_text(cx1 + 10, cy1 + 86, text=f"MODEL: {model_val}", font=("Consolas", 8), fill=C_PURPLE, anchor="w")
+                self.canvas.create_text(cx1 + 10, cy2 - 12, text="DEVELOPER ENVIRONMENT", font=("Consolas", 7), fill=C_TEXT_DIM, anchor="w")
+
+        total_rows = (len(cards) + num_cols - 1) // num_cols
+        return curr_y + total_rows * (card_h + GAP) + 4
+
+    def _draw_footer(self, curr_y: int, cur_w: int = WINDOW_WIDTH):
         fy = curr_y + 12
         target = getattr(self.config, "target_device", "ditoo").upper()
-        self.canvas.create_line(0, fy - 6, WINDOW_WIDTH, fy - 6, fill="#151D2A", width=1)
+        self.canvas.create_line(0, fy - 6, cur_w, fy - 6, fill="#151D2A", width=1)
 
         if target == "DITOO":
             active_a = self.state.ditoo_active_asset
@@ -1114,7 +1615,8 @@ class DesktopDashboardApp:
         else:
             active_p = self.state.minitoo_active_page.upper()
             cycle_str = " | AUTO-CYCLE: ON" if self.config.auto_cycle else ""
-            foot_text = f"TARGET: [ MINITOO ]  |  ACTIVE PAGE: [ {active_p} ]{cycle_str}"
+            focus_str = f" | FOCUS: {self.focus_section}" if self.focus_section else ""
+            foot_text = f"TARGET: [ MINITOO ]  |  ACTIVE PAGE: [ {active_p} ]{cycle_str}{focus_str}"
 
         self.canvas.create_text(
             GRID_MARGIN,
@@ -1126,9 +1628,9 @@ class DesktopDashboardApp:
         )
 
         self.canvas.create_text(
-            WINDOW_WIDTH - GRID_MARGIN,
+            cur_w - GRID_MARGIN,
             fy + 4,
-            text="DEVICE SELECTOR AT TOP",
+            text="DEVICE & PRESET BAR AT TOP",
             font=("Consolas", 7),
             fill=C_TEXT_DIM,
             anchor="e",

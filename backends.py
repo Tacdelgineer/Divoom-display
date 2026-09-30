@@ -8,8 +8,9 @@ from __future__ import annotations
 import os
 import sys
 import time
+import threading
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Dict, Any, List, Tuple
 from PIL import Image
 
 try:
@@ -79,6 +80,52 @@ class MiniTooDisplay(DisplayBackend):
     def __init__(self, port: Optional[str] = None, delay: float = 0.02):
         self.port = port
         self.delay = delay
+        # Diagnostics & Traffic Instrumentation
+        self.frames_sent_total: int = 0
+        self.bytes_sent_total: int = 0
+        self.spp_writes_total: int = 0
+        self.spp_reads_total: int = 0
+        self._history: List[Tuple[float, str, int, int]] = []
+        self._stats_lock = threading.Lock()
+
+    def record_traffic(self, event_type: str, count: int = 1, byte_count: int = 0):
+        """Record an SPP write/read/frame event for rolling rates."""
+        now = time.time()
+        with self._stats_lock:
+            self._history.append((now, event_type, count, byte_count))
+            cutoff = now - 60.0
+            while self._history and self._history[0][0] < cutoff:
+                self._history.pop(0)
+            if event_type == "write":
+                self.spp_writes_total += count
+                self.bytes_sent_total += byte_count
+            elif event_type == "read":
+                self.spp_reads_total += count
+            elif event_type == "frame":
+                self.frames_sent_total += count
+
+    def get_rolling_rates(self) -> Dict[str, Any]:
+        """Calculate per-minute traffic and packet metrics over the last 60 seconds."""
+        now = time.time()
+        cutoff = now - 60.0
+        with self._stats_lock:
+            while self._history and self._history[0][0] < cutoff:
+                self._history.pop(0)
+            writes_min = sum(item[2] for item in self._history if item[1] == "write")
+            reads_min = sum(item[2] for item in self._history if item[1] == "read")
+            frames_min = sum(item[2] for item in self._history if item[1] == "frame")
+            bytes_min = sum(item[3] for item in self._history if item[1] == "write")
+        return {
+            "writes_per_min": writes_min,
+            "reads_per_min": reads_min,
+            "frames_per_min": frames_min,
+            "bytes_per_min": bytes_min,
+            "kb_per_min": round(bytes_min / 1024.0, 2),
+            "frames_sent_total": self.frames_sent_total,
+            "bytes_sent_total": self.bytes_sent_total,
+            "spp_writes_total": self.spp_writes_total,
+            "spp_reads_total": self.spp_reads_total,
+        }
 
     @staticmethod
     def find_minitoo_port() -> Optional[str]:
@@ -177,15 +224,19 @@ class MiniTooDisplay(DisplayBackend):
         if ser is not None and getattr(ser, "is_open", False):
             try:
                 if ser.in_waiting:
-                    ser.read(ser.in_waiting)
+                    flushed = ser.read(ser.in_waiting)
+                    self.record_traffic("read", 1, len(flushed))
                 ser.write(packets[0])
                 ser.flush()
+                self.record_traffic("write", 1, len(packets[0]))
                 # Wait briefly for device response
                 deadline = time.time() + 2.0
                 resp = bytearray()
                 while time.time() < deadline:
                     if ser.in_waiting:
-                        resp.extend(ser.read(ser.in_waiting))
+                        chunk = ser.read(ser.in_waiting)
+                        resp.extend(chunk)
+                        self.record_traffic("read", 1, len(chunk))
                         if len(resp) >= 7 and resp[0] == 0x01:
                             break
                     time.sleep(0.01)
@@ -193,10 +244,13 @@ class MiniTooDisplay(DisplayBackend):
                 for pkt in packets[1:]:
                     ser.write(pkt)
                     ser.flush()
+                    self.record_traffic("write", 1, len(pkt))
                     time.sleep(self.delay)
                 time.sleep(0.05)
                 if ser.in_waiting:
-                    ser.read(ser.in_waiting)
+                    tail = ser.read(ser.in_waiting)
+                    self.record_traffic("read", 1, len(tail))
+                self.record_traffic("frame", 1, 0)
                 return True
             except Exception as e:
                 print(f"[MINITOO] Stream error on active connection: {e}")
@@ -214,18 +268,22 @@ class MiniTooDisplay(DisplayBackend):
                 ) as ser:
                     time.sleep(0.3)
                     if ser.in_waiting:
-                        ser.read(ser.in_waiting)
+                        flushed = ser.read(ser.in_waiting)
+                        self.record_traffic("read", 1, len(flushed))
 
                     # Send START packet
                     ser.write(packets[0])
                     ser.flush()
+                    self.record_traffic("write", 1, len(packets[0]))
 
                     # Wait for device ready
                     deadline = time.time() + 4.0
                     got = bytearray()
                     while time.time() < deadline:
                         if ser.in_waiting:
-                            got.extend(ser.read(ser.in_waiting))
+                            chunk = ser.read(ser.in_waiting)
+                            got.extend(chunk)
+                            self.record_traffic("read", 1, len(chunk))
                             if len(got) >= 7 and got[0] == 0x01:
                                 break
                         time.sleep(0.01)
@@ -234,14 +292,17 @@ class MiniTooDisplay(DisplayBackend):
                     for pkt in packets[1:]:
                         ser.write(pkt)
                         ser.flush()
+                        self.record_traffic("write", 1, len(pkt))
                         time.sleep(self.delay)
 
                     time.sleep(0.1)
                     if ser.in_waiting:
                         tail = ser.read(ser.in_waiting)
+                        self.record_traffic("read", 1, len(tail))
                         print(f"Display update confirmed! ({len(packets)-1} chunks)")
                     else:
                         print(f"Display chunks transferred ({len(packets)-1} chunks).")
+                    self.record_traffic("frame", 1, 0)
                     return True
             except serial.SerialException as e:
                 if attempt < 4 and ("Access is denied" in str(e) or "PermissionError" in str(e)):

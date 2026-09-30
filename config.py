@@ -75,10 +75,12 @@ DEFAULT_SECTION_CARDS = {
 # Presets
 PRESET_ALL = "ALL"
 PRESET_AI = "AI"
-PRESET_MARKETS = "MARKETS"
+PRESET_CRYPTO = "CRYPTO"
+PRESET_STOCKS = "STOCKS"
 PRESET_SYSTEM = "SYSTEM"
+PRESET_MARKETS = "MARKETS"
 
-ALL_PRESETS = [PRESET_ALL, PRESET_AI, PRESET_MARKETS, PRESET_SYSTEM]
+ALL_PRESETS = [PRESET_ALL, PRESET_AI, PRESET_CRYPTO, PRESET_STOCKS, PRESET_SYSTEM]
 
 
 def get_app_dir() -> str:
@@ -124,6 +126,16 @@ class DashboardConfig:
     section_cards: Dict[str, List[str]] = field(default_factory=lambda: {s: list(DEFAULT_SECTION_CARDS[s]) for s in ALL_SECTIONS})
     enabled_cards: Dict[str, bool] = field(default_factory=lambda: {c: True for c in ALL_PAGE_IDS})
     active_preset: str = PRESET_ALL
+
+    # Milestone 13 UX & Bluetooth Coexistence Enhancements
+    default_preset: str = PRESET_ALL
+    desktop_refresh_mode: str = "standard"  # "standard", "relaxed", "low_resource"
+    theme: str = "dark_retro"
+    focus_section: Optional[str] = None
+    enabled_cards_minitoo: Dict[str, bool] = field(default_factory=lambda: {c: True for c in ALL_PAGE_IDS})
+    minitoo_bt_mode: str = "NORMAL"  # "NORMAL", "LOW_INTERFERENCE"
+    minitoo_knob_enabled: bool = True
+    minitoo_poll_rate: str = "AUTO"  # "AUTO", "2Hz", "3Hz", "4Hz", "5Hz"
 
     # Milestone 12 Claude Account Profiles
     claude_profiles: List[Dict[str, Any]] = field(default_factory=lambda: [
@@ -185,10 +197,27 @@ class DashboardConfig:
                         valid_cards.append(def_c)
                 self.section_cards[s] = valid_cards
 
-        # Validate enabled_cards
+        # Validate enabled_cards (Desktop)
         for c in ALL_PAGE_IDS:
             if c not in self.enabled_cards:
                 self.enabled_cards[c] = True
+
+        # Validate enabled_cards_minitoo (MiniToo)
+        for c in ALL_PAGE_IDS:
+            if c not in self.enabled_cards_minitoo:
+                self.enabled_cards_minitoo[c] = self.enabled_cards.get(c, True)
+
+        # Validate minitoo_bt_mode
+        if self.minitoo_bt_mode not in ("NORMAL", "LOW_INTERFERENCE"):
+            self.minitoo_bt_mode = "NORMAL"
+
+        # Validate minitoo_poll_rate
+        if self.minitoo_poll_rate not in ("AUTO", "2Hz", "3Hz", "4Hz", "5Hz"):
+            self.minitoo_poll_rate = "AUTO"
+
+        # Validate default_preset
+        if self.default_preset not in ALL_PRESETS and self.default_preset != PRESET_MARKETS:
+            self.default_preset = PRESET_ALL
 
         # Validate last_selected_page
         if self.last_selected_page not in ALL_PAGE_IDS:
@@ -203,7 +232,7 @@ class DashboardConfig:
     def apply_preset(self, preset_name: str) -> None:
         """Apply one of the built-in dashboard presets."""
         p = preset_name.upper().strip()
-        if p not in ALL_PRESETS:
+        if p not in ALL_PRESETS and p != PRESET_MARKETS:
             p = PRESET_ALL
         self.active_preset = p
 
@@ -224,7 +253,29 @@ class DashboardConfig:
                 else:
                     self.enabled_cards[c] = False
 
-        elif p == PRESET_MARKETS:
+        elif p == PRESET_CRYPTO:
+            self.enabled_sections[SECTION_CRYPTO] = True
+            self.enabled_sections[SECTION_AI_USAGE] = False
+            self.enabled_sections[SECTION_SYSTEM] = False
+            self.enabled_sections[SECTION_STOCKS] = False
+            for c in ALL_PAGE_IDS:
+                if c in ("btc", "eth", "sol", "doge", "pepe", "crypto"):
+                    self.enabled_cards[c] = True
+                else:
+                    self.enabled_cards[c] = False
+
+        elif p == PRESET_STOCKS:
+            self.enabled_sections[SECTION_STOCKS] = True
+            self.enabled_sections[SECTION_CRYPTO] = False
+            self.enabled_sections[SECTION_AI_USAGE] = False
+            self.enabled_sections[SECTION_SYSTEM] = False
+            for c in ALL_PAGE_IDS:
+                if c in ("stocks_volatile",):
+                    self.enabled_cards[c] = True
+                else:
+                    self.enabled_cards[c] = False
+
+        elif p in (PRESET_MARKETS,):
             self.enabled_sections[SECTION_CRYPTO] = True
             self.enabled_sections[SECTION_STOCKS] = True
             self.enabled_sections[SECTION_AI_USAGE] = False
@@ -241,7 +292,7 @@ class DashboardConfig:
             self.enabled_sections[SECTION_AI_USAGE] = False
             self.enabled_sections[SECTION_STOCKS] = False
             for c in ALL_PAGE_IDS:
-                if c in ("local_pc", "dgx_spark", "services", "coding"):
+                if c in ("local_pc", "dgx_spark", "services", "coding", "ai_activity"):
                     self.enabled_cards[c] = True
                 else:
                     self.enabled_cards[c] = False
@@ -250,8 +301,8 @@ class DashboardConfig:
         """Return the enabled pages in the customized order for MiniToo rotation."""
         active = []
         for p in self.page_order:
-            # Check if card is enabled and its parent section is enabled
-            if self.enabled_cards.get(p, True):
+            # Check if card is enabled on MiniToo and its parent section is enabled
+            if self.enabled_cards_minitoo.get(p, True):
                 parent_sec = None
                 for s, cards in self.section_cards.items():
                     if p in cards:
@@ -302,6 +353,14 @@ class DashboardConfig:
             section_cards=data.get("section_cards", {s: list(DEFAULT_SECTION_CARDS[s]) for s in ALL_SECTIONS}),
             enabled_cards=data.get("enabled_cards", {c: True for c in ALL_PAGE_IDS}),
             active_preset=data.get("active_preset", PRESET_ALL),
+            default_preset=data.get("default_preset", PRESET_ALL),
+            desktop_refresh_mode=data.get("desktop_refresh_mode", "standard"),
+            theme=data.get("theme", "dark_retro"),
+            focus_section=data.get("focus_section", None),
+            enabled_cards_minitoo=data.get("enabled_cards_minitoo", {c: True for c in ALL_PAGE_IDS}),
+            minitoo_bt_mode=data.get("minitoo_bt_mode", "NORMAL"),
+            minitoo_knob_enabled=bool(data.get("minitoo_knob_enabled", True)),
+            minitoo_poll_rate=data.get("minitoo_poll_rate", "AUTO"),
             claude_profiles=data.get("claude_profiles", [
                 {"id": "personal", "user_label": "Personal", "config_dir": os.path.expanduser("~/.claude")},
                 {"id": "secondary", "user_label": "Secondary", "config_dir": os.path.expanduser("~/.claude-secondary")},

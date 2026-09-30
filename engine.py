@@ -335,10 +335,11 @@ class MiniTooController:
     Manages long-running connection to Divoom MiniToo:
     - Auto-detection and auto-recovery on disconnect with exponential backoff (1s, 2s, 5s, 10s max).
     - Ensures device remains in proven Custom/DIY Channel 5.
-    - Physical volume knob / button polling at ~16 Hz (NEXT/PREV navigation).
-    - Auto-cycle through enabled pages with configurable rotation interval.
-    - Caches transmitted frame to eliminate redundant Bluetooth transfers.
-    - Responds immediately to desktop card clicks.
+    - Low-interference Bluetooth coexistence mode (~2.5 Hz knob polling, relaxed health checks).
+    - Normal mode (~4 Hz knob polling, 60s health checks).
+    - Caches transmitted frame to eliminate redundant Bluetooth transfers (no periodic heartbeat).
+    - Collects real-time traffic diagnostics (writes/min, reads/min, frames/min, KB/min, reconnects).
+    - Responds immediately to desktop card clicks and hardware rotary controls.
     """
 
     BACKOFF_STEPS = [1.0, 2.0, 5.0, 10.0]
@@ -356,6 +357,89 @@ class MiniTooController:
         self._last_cycle_time: float = time.time()
         self._last_user_interaction: float = time.time()
 
+        # Diagnostics & Error Tracking
+        self.reconnect_count: int = 0
+        self.last_error: Optional[str] = None
+        self.last_error_time: float = 0.0
+
+    def get_diagnostics(self) -> Dict[str, Any]:
+        """Collect real-time diagnostics from display transport and input adapter."""
+        disp_rates = self.display.get_rolling_rates()
+        poll_diag = self._adapter.get_poll_diagnostics() if self._adapter else {
+            "knob_polls_per_sec": 0,
+            "channel_checks_per_min": 0,
+            "knob_polls_total": 0,
+            "channel_checks_total": 0,
+            "poll_interval": 0.25,
+            "knob_enabled": getattr(self.config, "minitoo_knob_enabled", True),
+        }
+
+        mode = getattr(self.config, "minitoo_bt_mode", "NORMAL")
+        status_str = "CONNECTED" if self.state.minitoo_connected else "DISCONNECTED"
+
+        return {
+            "status": status_str,
+            "port": self.port or self.config.minitoo_port,
+            "mode": mode,
+            "knob_enabled": poll_diag["knob_enabled"],
+            "poll_rate_setting": getattr(self.config, "minitoo_poll_rate", "AUTO"),
+            "poll_interval_sec": poll_diag["poll_interval"],
+            "knob_polls_per_sec": poll_diag["knob_polls_per_sec"],
+            "channel_checks_per_min": poll_diag["channel_checks_per_min"],
+            "writes_per_min": disp_rates["writes_per_min"],
+            "reads_per_min": disp_rates["reads_per_min"],
+            "frames_per_min": disp_rates["frames_per_min"],
+            "bytes_per_min": disp_rates["bytes_per_min"],
+            "kb_per_min": disp_rates["kb_per_min"],
+            "frames_sent_total": disp_rates["frames_sent_total"],
+            "bytes_sent_total": disp_rates["bytes_sent_total"],
+            "reconnect_count": self.reconnect_count,
+            "last_error": self.last_error or "None",
+            "last_error_time": self.last_error_time,
+        }
+
+    def format_diagnostics_report(self) -> str:
+        """Generate human-readable diagnostics report suitable for clipboard copying."""
+        d = self.get_diagnostics()
+        now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+        return (
+            f"=== MINITOO BLUETOOTH TRANSPORT DIAGNOSTICS ===\n"
+            f"Timestamp:             {now_str}\n"
+            f"Connection Status:     {d['status']} on {d['port']}\n"
+            f"Transport Mode:        {d['mode']}\n"
+            f"Knob Navigation:       {'ENABLED' if d['knob_enabled'] else 'DISABLED'}\n"
+            f"Knob Poll Rate Config: {d['poll_rate_setting']} ({d['poll_interval_sec']}s interval)\n"
+            f"\n"
+            f"--- Real-Time Rolling Rates (Last 60s) ---\n"
+            f"SPP Writes / min:      {d['writes_per_min']}\n"
+            f"SPP Reads / min:       {d['reads_per_min']}\n"
+            f"Frames Transmitted /m: {d['frames_per_min']}\n"
+            f"Bytes Transmitted /m:  {d['bytes_per_min']} B/min ({d['kb_per_min']} KB/min)\n"
+            f"Knob Polls / sec:      {d['knob_polls_per_sec']:.1f} Hz\n"
+            f"Channel Checks / min:  {d['channel_checks_per_min']}\n"
+            f"\n"
+            f"--- Session Totals & Health ---\n"
+            f"Total Frames Sent:     {d['frames_sent_total']}\n"
+            f"Total Bytes Sent:      {d['bytes_sent_total']} bytes\n"
+            f"Device Reconnects:     {d['reconnect_count']}\n"
+            f"Last Reported Error:   {d['last_error']}\n"
+            f"================================================\n"
+        )
+
+    def test_display(self) -> bool:
+        """Push a fresh test frame immediately."""
+        self._force_push = True
+        return True
+
+    def trigger_reconnect(self):
+        """Force a reconnect cycle."""
+        if self._adapter:
+            try:
+                self._adapter.close()
+            except Exception:
+                pass
+            self._adapter = None
+
     def update_config(self, config: DashboardConfig):
         port_changed = (config.minitoo_port != self.config.minitoo_port)
         self.config = config
@@ -364,6 +448,13 @@ class MiniTooController:
             self.push_page(active_pages[0])
         else:
             self._force_push = True
+
+        if self._adapter:
+            self._adapter.knob_enabled = getattr(self.config, "minitoo_knob_enabled", True)
+            self._adapter.set_poll_rate(
+                getattr(self.config, "minitoo_poll_rate", "AUTO"),
+                getattr(self.config, "minitoo_bt_mode", "NORMAL"),
+            )
 
         if port_changed and self._adapter:
             try:
@@ -428,9 +519,17 @@ class MiniTooController:
             # 2. Connection Phase
             self.state.set_minitoo_status(False, f"MINITOO ○ CONNECTING ({self.port})...")
             try:
-                self._adapter = MiniTooInputAdapter(port=self.port)
+                self._adapter = MiniTooInputAdapter(
+                    port=self.port,
+                    display=self.display,
+                    knob_enabled=getattr(self.config, "minitoo_knob_enabled", True),
+                    poll_rate=getattr(self.config, "minitoo_poll_rate", "AUTO"),
+                    bt_mode=getattr(self.config, "minitoo_bt_mode", "NORMAL"),
+                )
             except Exception as e:
                 self._adapter = None
+                self.last_error = str(e)
+                self.last_error_time = time.time()
 
             if not self._adapter or not self._adapter.ser or not self._adapter.ser.is_open:
                 delay = self.BACKOFF_STEPS[min(backoff_idx, len(self.BACKOFF_STEPS) - 1)]
@@ -443,6 +542,7 @@ class MiniTooController:
 
             # Connection Succeeded!
             backoff_idx = 0
+            self.reconnect_count += 1
             self.state.set_minitoo_status(True, f"MINITOO ● CONNECTED ({self.port})")
             self._last_sent_bytes = None
             self._force_push = True
@@ -459,8 +559,8 @@ class MiniTooController:
                 self.state.minitoo_active_page = active_pages[0]
 
             # 3. Connected Operational Loop
-            last_heartbeat = time.time()
             last_channel_check = time.time()
+            last_frame_sent_time = 0.0
             self._last_cycle_time = time.time()
 
             try:
@@ -468,13 +568,9 @@ class MiniTooController:
                     now = time.time()
                     active_pages = self.config.get_active_pages()
 
-                    # 15s display keep-alive heartbeat
-                    if now - last_heartbeat >= 15.0:
-                        self._force_push = True
-                        last_heartbeat = now
-
-                    # 8s display channel drift check (re-enter channel 5 if firmware drifted to clock)
-                    if now - last_channel_check >= 8.0:
+                    # Channel drift check: 60s in NORMAL, 120s in LOW_INTERFERENCE (no redundant 15s heartbeats)
+                    channel_check_interval = 120.0 if getattr(self.config, "minitoo_bt_mode", "NORMAL") == "LOW_INTERFERENCE" else 60.0
+                    if now - last_channel_check >= channel_check_interval:
                         last_channel_check = now
                         ch = self._adapter.query_channel()
                         if ch is not None and ch != 5:
@@ -513,23 +609,31 @@ class MiniTooController:
                         self._force_push = True
 
                     # Render and transmit frame if needed
-                    img = self._render_active_frame()
-                    if img:
-                        # Fast comparison to avoid redundant Bluetooth streaming
-                        frame_bytes = img.tobytes()
-                        if self._force_push or frame_bytes != self._last_sent_bytes:
-                            # Stream frame to device (ser maintained open)
-                            ok = self.display.show(img, ser=self._adapter.ser)
-                            if ok:
-                                self._last_sent_bytes = frame_bytes
-                                self._force_push = False
-                                print(f"[MINITOO] Frame updated -> {self.state.minitoo_active_page.upper()}", flush=True)
-                            else:
-                                raise serial.SerialException("Display stream failed")
+                    # In LOW_INTERFERENCE mode, throttle physical screen updates to min 3.0s unless forced
+                    is_low_int = (getattr(self.config, "minitoo_bt_mode", "NORMAL") == "LOW_INTERFERENCE")
+                    throttle_min = 3.0 if is_low_int else 0.5
+                    can_send = self._force_push or (now - last_frame_sent_time >= throttle_min)
 
-                    time.sleep(0.06)  # ~16 Hz poll cadence
+                    if can_send:
+                        img = self._render_active_frame()
+                        if img:
+                            # Frame diffing: never resend identical bytes
+                            frame_bytes = img.tobytes()
+                            if self._force_push or frame_bytes != self._last_sent_bytes:
+                                ok = self.display.show(img, ser=self._adapter.ser)
+                                if ok:
+                                    self._last_sent_bytes = frame_bytes
+                                    self._force_push = False
+                                    last_frame_sent_time = now
+                                    print(f"[MINITOO] Frame updated -> {self.state.minitoo_active_page.upper()}", flush=True)
+                                else:
+                                    raise serial.SerialException("Display stream failed")
+
+                    time.sleep(0.08)
 
             except Exception as e:
+                self.last_error = str(e)
+                self.last_error_time = time.time()
                 print(f"[MINITOO] Disconnect detected: {e}")
                 if self._adapter:
                     try:
@@ -540,6 +644,7 @@ class MiniTooController:
 
                 self.state.set_minitoo_status(False, "MINITOO ○ DISCONNECTED")
                 time.sleep(0.5)
+
 
 
 # ==============================================================================

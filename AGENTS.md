@@ -64,8 +64,9 @@
 
 | File | Purpose | Critical Rules |
 | :--- | :--- | :--- |
-| `dashboard_app.py` | Main Desktop Companion application | Pure Tkinter; resizable canvas; presets; Focus mode; card clicks |
-| `ui_components.py` | Redesigned 5-tab SettingsDialog | Left navigation; independent Desktop vs MiniToo card checkboxes |
+| `dashboard_app.py` | Main Desktop Companion application | Pure Tkinter; High-DPI; responsive reflow; presets; Focus; Creator views |
+| `ui_scale.py` | Centralized UI scale & High-DPI tokens | Per-Monitor-V2 awareness; font scaling; never used for MiniToo 160x128 |
+| `ui_components.py` | Redesigned 5-tab SettingsDialog | Left navigation; UI scale dropdown; independent Desktop vs MiniToo toggles |
 | `engine.py` | Background scheduler & MiniToo controller | Decoupled collector updates; 0 redundant frames; telemetry report |
 | `market_provider.py` | Stock quote & volatility provider abstraction | Pluggable interface; YahooFinance (free) & Finnhub; cached |
 | `collectors.py` | Data collectors (GPU, DGX, Multi-Crypto, Stocks, Git) | Consolidated requests; 60s caches; never block the UI thread |

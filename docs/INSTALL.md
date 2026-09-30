@@ -24,10 +24,16 @@ If using the physical Divoom MiniToo display:
 5. The application automatically enumerates Bluetooth SPP serial ports and links to your MiniToo. The status in the header will switch to **MINITOO OK**.
 
 ### 3. Customize Your Dashboard
-- **Creator Presets**: Use header buttons `[ ALL ]`, `[ AI ]`, `[ CRYPTO ]`, `[ STOCKS ]`, `[ SYSTEM ]` for instant layout switching.
-- **Creator Focus Mode**: Click `[ 🔍 FOCUS ]` on any section header to film or view that section in a dedicated enlarged hero layout. Click `[ ◀ BACK / ALL ]` to return.
+- **High-DPI & Desktop UI Scale**: Choose between `AUTO` (recommended, automatically detects your Windows monitor DPI), `100%`, `125%`, `150%`, `175%`, or `200%` under **Settings → GENERAL**.
+- **Keyboard Shortcuts**:
+  - `Ctrl+,` or `Ctrl+P`: Open Settings modal.
+  - `1..5`: Switch presets (`1`=ALL, `2`=AI, `3`=CRYPTO, `4`=STOCKS, `5`=SYSTEM).
+  - `F11`: Toggle fullscreen presentation mode.
+  - `Esc`: Instantly exit Focus Mode, Creator Mode, or Fullscreen.
+- **Creator Capture Mode**: Click the **🎬 CREATOR** button in the header for a clean, distraction-free recording surface tailored for OBS, YouTube Shorts, and Reels. Toggle between **16:9** and **9:16 Vertical Shorts** with one click.
+- **Creator Focus Mode**: Click `[ 🔍 FOCUS ]` on any section header to film or view that section in a dedicated enlarged hero layout. Click `[ ◀ BACK TO ALL ]` or press `Esc` to return.
 - **Redesigned 5-Tab Settings**: Click the **⚙ SETTINGS** button in the header to open the categorized configuration modal:
-  - **GENERAL**: Windows startup (`HKCU\Run`), launch minimized, default startup preset, refresh behavior.
+  - **GENERAL**: Windows startup (`HKCU\Run`), launch minimized, desktop UI scale selector (`AUTO`, `100%`, `125%`, `150%`, `175%`, `200%`), and reset window dimensions.
   - **DASHBOARD**: Expandable section tree with independent **Desktop [x]** and **MiniToo [x]** toggles per card, plus dedicated `▲` / `▼` ordering buttons.
   - **MINITOO**: Bluetooth connection status, transport mode (**NORMAL** vs **LOW INTERFERENCE**), auto-cycle toggle, dwell interval (seconds per page), knob toggle, poll rate, live rolling 60-second telemetry, and hardware action buttons (**TEST DISPLAY**, **RECONNECT**, **COPY DIAGNOSTICS**).
   - **INTEGRATIONS**: Remote DGX Spark hostname/Tailscale IP, optional Finnhub API key, and Claude account profile discovery.

@@ -354,3 +354,56 @@ The Settings dialog (`ui_components.py`) uses a 5-tab left-navigation structure:
 - **MINITOO**: Connection port, transport mode selector (**NORMAL** vs **LOW INTERFERENCE**), auto-cycle toggle, dwell interval, live rolling telemetry display, and action buttons (`TEST DISPLAY`, `RECONNECT`, `COPY DIAGNOSTICS`).
 - **INTEGRATIONS**: Tailscale DGX node host, API keys, and Claude profile discovery.
 - **ADVANCED**: Debug logging, raw protocol inspector, and factory reset.
+
+---
+
+## 12. High-DPI Desktop Command Center & UI Scale Engine (`ui_scale.py`)
+
+Milestone 14 elevates the desktop application from a compact widget window into a scalable command center designed for 1080p, 1440p, and 4K displays.
+
+### 1. Windows Per-Monitor-V2 High-DPI Awareness
+Windows scales Win32/Tkinter windows using blurry bitmap virtualization unless the process explicitly declares DPI awareness **before** the first window handle (`HWND`) is instantiated:
+```python
+# Executed immediately upon module import before tk.Tk()
+enable_high_dpi_awareness()
+```
+The helper prefers:
+1. `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4)` (Windows 10 1703+)
+2. `SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE = 2)` (Windows 8.1+)
+3. `SetProcessDPIAware()` (Vista+)
+
+### 2. Centralized UI Scale Engine
+All desktop fonts, padding, margins, card dimensions, button hit targets, and sparkline heights derive from `ui_scale.py`:
+- **Options**: `AUTO` (derived from Windows system DPI), `100%`, `125%`, `150%`, `175%`, `200%`.
+- **Scaling helper**: `ui_scale.s(pixel_value)` multiplies integer dimensions by the active factor.
+- **Font descriptors**: `ui_scale.f_app_title`, `ui_scale.f_section_title`, `ui_scale.f_card_title`, `ui_scale.f_primary_metric`, `ui_scale.f_secondary_metric`, `ui_scale.f_btn`, `ui_scale.f_meta`.
+- **MiniToo Display Isolation**: MiniToo 160×128 pixel generation strictly **bypasses** `ui_scale.py`, ensuring physical display pixel perfection is 100% preserved.
+
+### 3. Responsive Card Reflow Mathematics
+Cards dynamically calculate the optimal column count rather than shrinking into unreadable slivers or stretching into ultra-wide shapes:
+```python
+avail_w = cur_w - 2 * margin
+num_cols = max(1, min(len(cards), (avail_w + gap) // (ui_scale.card_min_w + gap)))
+card_w = (avail_w - (num_cols - 1) * gap) // num_cols
+if card_w > ui_scale.card_max_w:
+    card_w = ui_scale.card_max_w
+# Center grid when clamped to card_max_w
+grid_w = num_cols * card_w + (num_cols - 1) * gap
+start_x = margin + max(0, (avail_w - grid_w) // 2)
+```
+- **Wide 1080p / 1440p displays**: All 5 cryptocurrency cards (**BTC, ETH, SOL, DOGE, PEPE**) fit cleanly across in 1 row.
+- **Medium windows**: Reflows into 3 or 4 columns.
+- **Compact windows**: Reflows into 2 readable columns.
+
+### 4. Creator Capture Mode (16:9 & 9:16 Shorts)
+Designed for YouTube Shorts, Reels, TikTok, and OBS capture:
+- **Clean composition**: Strips settings buttons, autostart toggles, and extraneous background metadata.
+- **9:16 Vertical Shorts Mode**: Centers a vertical column of stacked presentation cards (e.g. BTC, ETH, SOL, DOGE, PEPE stacked vertically with large prices, deltas, and 80px sparklines).
+- **16:9 Mode**: Clean widescreen presentation view.
+
+### 5. Keyboard Navigation & Fullscreen Mode
+- `Ctrl+,` or `Ctrl+P`: Settings dialog
+- `1..5`: Quick preset switching (`1`=ALL, `2`=AI, `3`=CRYPTO, `4`=STOCKS, `5`=SYSTEM)
+- `F11`: Fullscreen presentation mode
+- `Esc`: Instant exit from Fullscreen, Creator Mode, or Section Focus
+

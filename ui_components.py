@@ -34,6 +34,7 @@ from config import (
 )
 from detector import detect_minitoo_port, get_all_com_ports
 from subproc import check_output_hidden, run_hidden
+from ui_scale import ui_scale, UI_SCALE_OPTIONS
 import claude_usage
 
 # Design System
@@ -442,15 +443,17 @@ class SettingsDialog(tk.Toplevel):
         self.state = state
 
         self.title("AI Desk Dashboard — Configuration")
-        self.geometry("740x640")
-        self.minsize(680, 520)
+        sw = min(ui_scale.s(900), max(640, parent.winfo_screenwidth() - 40))
+        sh = min(ui_scale.s(660), max(500, parent.winfo_screenheight() - 60))
+        self.geometry(f"{sw}x{sh}")
+        self.minsize(min(ui_scale.s(740), sw), min(ui_scale.s(520), sh))
         self.configure(bg=C_BG)
         self.transient(parent)
         self.grab_set()
 
         self.update_idletasks()
-        px = parent.winfo_x() + (parent.winfo_width() - 740) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - 640) // 2
+        px = parent.winfo_x() + (parent.winfo_width() - sw) // 2
+        py = parent.winfo_y() + (parent.winfo_height() - sh) // 2
         self.geometry(f"+{max(20, px)}+{max(20, py)}")
 
         # Working state copies
@@ -473,6 +476,7 @@ class SettingsDialog(tk.Toplevel):
         self.var_minimized = tk.BooleanVar(value=self.config.launch_minimized)
         self.var_default_preset = tk.StringVar(value=self.config.default_preset or PRESET_ALL)
         self.var_refresh_mode = tk.StringVar(value=self.config.desktop_refresh_mode or "standard")
+        self.var_ui_scale = tk.StringVar(value=getattr(self.config, "ui_scale", "AUTO"))
 
         # MiniToo Tab Variables
         self.var_minitoo_port = tk.StringVar(value=self.config.minitoo_port or "AUTO")
@@ -759,6 +763,22 @@ class SettingsDialog(tk.Toplevel):
         )
         t_box.pack(fill="x", pady=6)
 
+        scale_row = tk.Frame(t_box, bg=C_PANEL_BG)
+        scale_row.pack(fill="x", pady=(2, 4))
+        tk.Label(scale_row, text="DESKTOP UI SCALE:", font=("Consolas", 8, "bold"), fg=C_TEXT_MUTED, bg=C_PANEL_BG, width=18, anchor="w").pack(side="left")
+        om_scale = tk.OptionMenu(scale_row, self.var_ui_scale, *UI_SCALE_OPTIONS)
+        om_scale.config(bg="#0D121D", fg=C_CYAN, font=("Consolas", 8, "bold"), highlightthickness=1, highlightbackground=C_BORDER)
+        om_scale["menu"].config(bg="#0D121D", fg=C_TEXT_WHITE, font=("Consolas", 8))
+        om_scale.pack(side="left", padx=4)
+
+        tk.Label(
+            t_box,
+            text="AUTO derives from Windows display scaling (100%–200%). Scales fonts, cards, and hit targets.",
+            font=("Consolas", 7),
+            fg=C_TEXT_DIM,
+            bg=C_PANEL_BG,
+        ).pack(anchor="w", pady=(0, 6))
+
         tk.Label(
             t_box,
             text="ACTIVE THEME: Dark Retro Cyberpunk (Default)",
@@ -770,11 +790,14 @@ class SettingsDialog(tk.Toplevel):
         def _reset_win_pos():
             self.config.window_x = 100
             self.config.window_y = 100
-            self.master.geometry("640x600+100+100")
+            self.config.window_width = ui_scale.default_window_w
+            self.config.window_height = ui_scale.default_window_h
+            self.config.window_maximized = False
+            self.master.geometry(f"{ui_scale.default_window_w}x{ui_scale.default_window_h}+100+100")
 
         tk.Button(
             t_box,
-            text="[ RESET WINDOW POSITION ]",
+            text="[ RESET WINDOW SIZE & POSITION ]",
             font=("Consolas", 8),
             bg="#161F2E",
             fg=C_TEXT_WHITE,
@@ -1534,6 +1557,8 @@ class SettingsDialog(tk.Toplevel):
         self.config.launch_minimized = self.var_minimized.get()
         self.config.default_preset = self.var_default_preset.get().strip() or PRESET_ALL
         self.config.desktop_refresh_mode = self.var_refresh_mode.get().strip() or "standard"
+        self.config.ui_scale = self.var_ui_scale.get().strip() or "AUTO"
+        ui_scale.update_setting(self.config.ui_scale)
 
         # MiniToo
         self.config.minitoo_port = self.var_minitoo_port.get().strip() or "AUTO"

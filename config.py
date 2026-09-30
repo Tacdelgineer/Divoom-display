@@ -137,6 +137,14 @@ class DashboardConfig:
     minitoo_knob_enabled: bool = True
     minitoo_poll_rate: str = "AUTO"  # "AUTO", "2Hz", "3Hz", "4Hz", "5Hz"
 
+    # Milestone 14 High-DPI Desktop Command Center & Creator Presets
+    ui_scale: str = "AUTO"  # "AUTO", "100%", "125%", "150%", "175%", "200%"
+    window_width: Optional[int] = None
+    window_height: Optional[int] = None
+    window_maximized: bool = False
+    creator_mode: bool = False
+    creator_aspect: str = "16:9"  # "16:9", "9:16"
+
     # Milestone 12 Claude Account Profiles
     claude_profiles: List[Dict[str, Any]] = field(default_factory=lambda: [
         {"id": "personal", "user_label": "Personal", "config_dir": os.path.expanduser("~/.claude")},
@@ -228,6 +236,16 @@ class DashboardConfig:
             self.rotation_interval = 1.0
         elif self.rotation_interval > 300.0:
             self.rotation_interval = 300.0
+
+        # Validate Milestone 14 High-DPI & Creator properties
+        if self.ui_scale not in ("AUTO", "100%", "125%", "150%", "175%", "200%"):
+            self.ui_scale = "AUTO"
+        if self.creator_aspect not in ("16:9", "9:16"):
+            self.creator_aspect = "16:9"
+        if self.window_width is not None and self.window_width < 400:
+            self.window_width = 400
+        if self.window_height is not None and self.window_height < 300:
+            self.window_height = 300
 
     def apply_preset(self, preset_name: str) -> None:
         """Apply one of the built-in dashboard presets."""
@@ -361,6 +379,12 @@ class DashboardConfig:
             minitoo_bt_mode=data.get("minitoo_bt_mode", "NORMAL"),
             minitoo_knob_enabled=bool(data.get("minitoo_knob_enabled", True)),
             minitoo_poll_rate=data.get("minitoo_poll_rate", "AUTO"),
+            ui_scale=data.get("ui_scale", "AUTO"),
+            window_width=data.get("window_width"),
+            window_height=data.get("window_height"),
+            window_maximized=bool(data.get("window_maximized", False)),
+            creator_mode=bool(data.get("creator_mode", False)),
+            creator_aspect=data.get("creator_aspect", "16:9"),
             claude_profiles=data.get("claude_profiles", [
                 {"id": "personal", "user_label": "Personal", "config_dir": os.path.expanduser("~/.claude")},
                 {"id": "secondary", "user_label": "Secondary", "config_dir": os.path.expanduser("~/.claude-secondary")},

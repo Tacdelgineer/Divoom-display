@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Generate crisp, clean, high-resolution screenshots for AI Desk Dashboard documentation:
-1. assets/screenshots/preset-ai.png (AI hero preset: Codex, Gemini, Claude quotas + AI Activity)
-2. assets/screenshots/preset-crypto.png (CRYPTO hero preset: BTC, ETH, SOL, DOGE, PEPE + sparklines)
-3. assets/screenshots/preset-stocks.png (STOCKS hero preset: Top 10 Volatile Stocks Scanner)
-4. assets/screenshots/preset-system.png (SYSTEM hero preset: Local RTX, DGX Spark, Services, Coding)
-5. assets/screenshots/preset-all.png (ALL preset with all 4 dashboard sections)
-6. assets/screenshots/settings-dashboard.png (Redesigned 5-tab Settings UI: DASHBOARD tab with Desktop & MiniToo toggles)
-7. assets/screenshots/settings-minitoo.png (Redesigned 5-tab Settings UI: MINITOO tab with diagnostics & Low Interference mode)
+Generate crisp, clean, high-resolution 1080p (1920x1080) and 9:16 Vertical Creator screenshots
+for AI Desk Dashboard Milestone 14 documentation:
+1. assets/screenshots/preset-all.png (1920x1080 command center hero: Crypto, AI, Stocks, System)
+2. assets/screenshots/preset-ai.png (1920x1080 AI hero preset: Codex, Gemini, Claude quotas + Agent Activity)
+3. assets/screenshots/preset-crypto.png (1920x1080 CRYPTO hero preset: 5-asset layout with high-res sparklines)
+4. assets/screenshots/preset-stocks.png (1920x1080 STOCKS hero preset: Top 10 Volatile Stocks Scanner terminal)
+5. assets/screenshots/preset-system.png (1920x1080 SYSTEM hero preset: Local RTX 5080, DGX Spark, Services, Coding)
+6. assets/screenshots/settings-dashboard.png (900x660 High-DPI Settings UI: DASHBOARD tab & UI Scale system)
+7. assets/screenshots/settings-minitoo.png (900x660 High-DPI Settings UI: MINITOO tab with Bluetooth Low Interference)
+8. assets/screenshots/creator-crypto-vertical.png (1080x1920 9:16 vertical Shorts capture: BTC, ETH, SOL, DOGE, PEPE)
+9. assets/screenshots/creator-ai-vertical.png (1080x1920 9:16 vertical Shorts capture: Codex, Gemini, Claude, Activity)
 """
 import os
 import math
@@ -50,8 +53,7 @@ C_ETH = (98, 126, 234)
 C_DOGE = (194, 166, 51)
 C_PEPE = (72, 199, 116)
 
-def draw_segmented_bar(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int, pct: float | None, color: tuple):
-    segments = 20
+def draw_segmented_bar(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int, pct: float | None, color: tuple, segments: int = 16):
     gap = 2
     seg_w = (w - (segments - 1) * gap) / segments
     active_count = int(round((pct / 100.0) * segments)) if pct is not None else 0
@@ -61,7 +63,7 @@ def draw_segmented_bar(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int
         fill = color if i < active_count else (24, 32, 46)
         draw.rectangle([sx, y, sx + seg_w, y + h], fill=fill)
 
-def draw_card(
+def draw_card_frame(
     draw: ImageDraw.ImageDraw,
     x: int, y: int, w: int, h: int,
     title: str,
@@ -69,642 +71,826 @@ def draw_card(
     badge_text: str,
     badge_color: tuple,
     is_active: bool = False,
+    is_hover: bool = False,
 ):
-    border_col = C_ACTIVE_CYAN if is_active else C_CARD_BORDER
+    border_col = C_ACTIVE_CYAN if is_active else ((45, 59, 84) if is_hover else C_CARD_BORDER)
     border_w = 2 if is_active else 1
     bg_col = (18, 26, 43) if is_active else C_CARD_BG
 
     draw.rectangle([x, y, x + w, y + h], fill=bg_col, outline=border_col, width=border_w)
 
-    f_title = get_font(11, bold=True)
-    f_badge = get_font(9, bold=True)
+    f_title = get_font(13, bold=True)
+    f_badge = get_font(10, bold=True)
 
-    draw.text((x + 8, y + 6), title, fill=title_color, font=f_title)
+    draw.text((x + 14, y + 12), title, fill=title_color, font=f_title)
 
     if is_active:
-        draw.rectangle([x + w - 76, y + 4, x + w - 6, y + 18], fill=C_ACTIVE_TAG_BG, outline=C_ACTIVE_CYAN)
-        draw.text((x + w - 68, y + 5), "ON MINITOO", fill=C_ACTIVE_CYAN, font=f_badge)
+        tag_w = 90
+        draw.rectangle([x + w - tag_w - 12, y + 10, x + w - 12, y + 28], fill=C_ACTIVE_TAG_BG, outline=C_ACTIVE_CYAN)
+        draw.text((x + w - tag_w - 4, y + 12), "ON MINITOO", fill=C_ACTIVE_CYAN, font=f_badge)
     else:
-        draw.rectangle([x + w - 66, y + 4, x + w - 6, y + 18], fill=(22, 29, 43), outline=(37, 50, 73))
-        draw.ellipse([x + w - 58, y + 9, x + w - 53, y + 14], fill=badge_color)
-        draw.text((x + w - 48, y + 5), badge_text, fill=C_TEXT_WHITE, font=f_badge)
+        tag_w = 80
+        draw.rectangle([x + w - tag_w - 12, y + 10, x + w - 12, y + 28], fill=(22, 29, 43), outline=(37, 50, 73))
+        draw.ellipse([x + w - tag_w - 4, y + 16, x + w - tag_w + 2, y + 22], fill=badge_color)
+        draw.text((x + w - tag_w + 8, y + 12), badge_text, fill=C_TEXT_WHITE, font=f_badge)
 
-    draw.line([x + 6, y + 23, x + w - 6, y + 23], fill=(27, 35, 53), width=1)
+def draw_command_center_header(draw: ImageDraw.ImageDraw, w: int, active_preset: str = "ALL"):
+    f_title = get_font(14, bold=True)
+    f_btn = get_font(11, bold=True)
+    f_meta = get_font(10, bold=False)
 
-def draw_header(draw: ImageDraw.ImageDraw, w: int, active_preset: str = "ALL"):
-    f_ui = get_font(11, bold=True)
-    f_sub = get_font(9, bold=False)
-    f_btn = get_font(8, bold=True)
+    draw.rectangle([0, 0, w, 68], fill=C_HEADER_BG, outline=(24, 32, 48), width=1)
 
-    draw.rectangle([0, 0, w, 64], fill=C_HEADER_BG, outline=(24, 32, 48), width=1)
-    draw.text((12, 10), "AI DESK DASHBOARD", fill=C_ACTIVE_CYAN, font=f_ui)
-    draw.text((160, 13), "v0.3.0", fill=C_TEXT_DIM, font=f_sub)
+    # 1. App Title
+    draw.text((20, 24), "AI DESK DASHBOARD", fill=C_ACTIVE_CYAN, font=f_title)
 
-    # MiniToo status pill
-    draw.rectangle([w - 290, 8, w - 175, 28], fill=(16, 24, 38), outline=C_ACTIVE_CYAN)
-    draw.ellipse([w - 284, 15, w - 278, 21], fill=C_GREEN)
-    draw.text((w - 272, 11), "MINITOO ● COM13", fill=C_ACTIVE_CYAN, font=f_sub)
+    # 2. Device Selector
+    dev_x = 240
+    draw.rectangle([dev_x, 16, dev_x + 135, 52], fill=(16, 24, 38), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((dev_x + 14, 25), "🖥 MiniToo ▼", fill=C_ACTIVE_CYAN, font=f_btn)
 
-    # Autostart
-    draw.rectangle([w - 168, 8, w - 84, 28], fill=(14, 36, 25), outline=C_GREEN)
-    draw.text((w - 160, 11), "AUTOSTART: ON", fill=C_GREEN, font=f_btn)
-
-    # Settings
-    draw.rectangle([w - 78, 8, w - 12, 28], fill=(20, 28, 44), outline=(40, 52, 75))
-    draw.text((w - 70, 11), "⚙ SETTINGS", fill=C_ACTIVE_CYAN, font=f_btn)
-
-    # Line 2: Presets (Milestone 13: ALL | AI | CRYPTO | STOCKS | SYSTEM)
-    draw.text((12, 42), "PRESET:", fill=C_TEXT_DIM, font=f_btn)
-    px = 72
+    # 3. Presets
+    px = 405
+    draw.text((px, 26), "PRESET:", fill=C_TEXT_DIM, font=f_meta)
+    px += 65
     for p in ["ALL", "AI", "CRYPTO", "STOCKS", "SYSTEM"]:
         is_act = (p == active_preset)
-        p_bg = (11, 38, 56) if is_act else (16, 22, 34)
+        p_bg = (11, 56, 74) if is_act else (16, 22, 34)
         p_fg = C_ACTIVE_CYAN if is_act else C_TEXT_MUTED
         p_bd = C_ACTIVE_CYAN if is_act else (28, 37, 54)
-        btn_w = 68 if p in ["CRYPTO", "STOCKS", "SYSTEM"] else 52
-        draw.rectangle([px, 34, px + btn_w, 54], fill=p_bg, outline=p_bd, width=1)
-        draw.text((px + 8, 38), f"[ {p} ]", fill=p_fg, font=f_btn)
-        px += btn_w + 6
+        bw = 80 if p in ["CRYPTO", "STOCKS", "SYSTEM"] else 60
+        draw.rectangle([px, 16, px + bw, 52], fill=p_bg, outline=p_bd, width=2 if is_act else 1)
+        draw.text((px + bw // 2 - 16, 25), p, fill=p_fg, font=f_btn)
+        px += bw + 8
+
+    # 4. Right Utility Bar
+    # Settings
+    set_x2 = w - 20
+    set_x1 = set_x2 - 120
+    draw.rectangle([set_x1, 16, set_x2, 52], fill=(19, 27, 42), outline=(37, 53, 79), width=1)
+    draw.text((set_x1 + 16, 25), "⚙ SETTINGS", fill=C_ACTIVE_CYAN, font=f_btn)
+
+    # Autostart
+    auto_x2 = set_x1 - 12
+    auto_x1 = auto_x2 - 130
+    draw.rectangle([auto_x1, 16, auto_x2, 52], fill=(14, 36, 25), outline=C_GREEN, width=1)
+    draw.text((auto_x1 + 18, 25), "⚡ AUTO: ON", fill=C_GREEN, font=f_btn)
+
+    # Creator View
+    creat_x2 = auto_x1 - 12
+    creat_x1 = creat_x2 - 125
+    draw.rectangle([creat_x1, 16, creat_x2, 52], fill=(27, 20, 40), outline=(64, 37, 95), width=1)
+    draw.text((creat_x1 + 14, 25), "🎬 CREATOR", fill=C_PURPLE, font=f_btn)
+
+    # Connection Status Pill
+    pill_x2 = creat_x1 - 14
+    pill_x1 = pill_x2 - 180
+    draw.rectangle([pill_x1, 16, pill_x2, 52], fill=(13, 38, 27), outline=(27, 77, 54), width=1)
+    draw.ellipse([pill_x1 + 12, 31, pill_x1 + 20, 39], fill=C_GREEN)
+    draw.text((pill_x1 + 28, 26), "MINITOO ● COM13", fill=C_GREEN, font=f_meta)
+
+    draw.line([0, 68, w, 68], fill=(21, 29, 42), width=1)
 
 # ---------------------------------------------------------------------------
-# 1. PRESET ALL SCREENSHOT
+# 1. 1920x1080 COMMAND CENTER SCREENSHOT (PRESET ALL)
 # ---------------------------------------------------------------------------
 def render_preset_all_screenshot(out_path: str):
-    """Renders comprehensive ALL preset dashboard with all 4 sections."""
-    w, h = 680, 760
+    """Renders 1080p full command center dashboard with all 4 responsive sections."""
+    w, h = 1920, 1080
     img = Image.new("RGBA", (w, h), C_BG)
     draw = ImageDraw.Draw(img)
-    draw_header(draw, w, active_preset="ALL")
+    draw_command_center_header(draw, w, active_preset="ALL")
 
-    f_sec = get_font(9, bold=True)
-    f_bold = get_font(10, bold=True)
-    f_small = get_font(8, bold=False)
+    f_sec = get_font(13, bold=True)
+    f_btn = get_font(11, bold=True)
+    f_hero = get_font(20, bold=True)
+    f_sec_metric = get_font(13, bold=True)
+    f_meta = get_font(10, bold=False)
 
-    curr_y = 74
-    card_w = 212
-    card_h = 120
-    gap = 8
-    m = 10
+    m = 20
+    curr_y = 82
+    gap = 14
 
-    # 1. SECTION: CRYPTO MARKETS
-    draw.text((m, curr_y), "─── [ CRYPTO MARKETS ] ", fill=C_GOLD, font=f_sec)
-    draw.rectangle([w - 88, curr_y - 2, w - m, curr_y + 14], fill=(16, 24, 38), outline=C_ACTIVE_CYAN)
-    draw.text((w - 82, curr_y + 1), "🔍 FOCUS", fill=C_ACTIVE_CYAN, font=f_small)
-    draw.line([m + 130, curr_y + 6, w - 96, curr_y + 6], fill=(24, 32, 48), width=1)
-    curr_y += 18
+    # 1. SECTION: CRYPTO MARKETS (5 cards fit across full 1920px screen in 1 row!)
+    draw.text((m, curr_y), "─── [ CRYPTO MARKETS ]", fill=C_GOLD, font=f_sec)
+    draw.rectangle([m + 230, curr_y - 4, m + 325, curr_y + 20], fill=(19, 27, 42), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((m + 242, curr_y + 1), "[ 🔍 FOCUS ]", fill=C_ACTIVE_CYAN, font=f_btn)
+    draw.line([m + 340, curr_y + 8, w - m, curr_y + 8], fill=(24, 32, 48), width=1)
+    curr_y += 30
 
-    # BTC, ETH, SOL
-    c1 = (m, curr_y)
-    draw_card(draw, c1[0], c1[1], card_w, card_h, "₿ BTC", C_GOLD, "-0.9%", C_RED, is_active=True)
-    draw.text((c1[0] + 8, c1[1] + 32), "$84,021", fill=C_GOLD, font=get_font(13, bold=True))
-    draw.text((c1[0] + card_w - 55, c1[1] + 32), "-0.9%", fill=C_RED, font=f_bold)
-    pts = [0.2, 0.28, 0.24, 0.42, 0.38, 0.52, 0.48, 0.65, 0.58, 0.72, 0.68, 0.85, 0.78, 0.92, 0.88, 0.95]
-    step = (card_w - 20) / (len(pts) - 1)
-    sp_pts = [(c1[0] + 10 + i * step, c1[1] + 85 - v * 35) for i, v in enumerate(pts)]
-    for i in range(len(sp_pts) - 1):
-        draw.line([sp_pts[i], sp_pts[i+1]], fill=C_GOLD, width=2)
-    draw.text((c1[0] + 8, c1[1] + card_h - 14), "H $85,208  L $83,230", fill=C_TEXT_DIM, font=f_small)
+    crypto_w = (w - 2 * m - 4 * gap) // 5
+    crypto_h = 165
+    coins_data = [
+        ("btc", "₿ BTC · BITCOIN", "$84,021", "-0.9%", C_GOLD, C_RED, [0.2, 0.28, 0.24, 0.42, 0.38, 0.52, 0.48, 0.65, 0.58, 0.72, 0.68, 0.85, 0.78, 0.92, 0.88, 0.95], True),
+        ("eth", "Ξ ETH · ETHEREUM", "$2,691", "-0.2%", C_ETH, C_RED, [0.8, 0.72, 0.75, 0.62, 0.65, 0.55, 0.58, 0.48, 0.52, 0.42, 0.45, 0.35, 0.38, 0.28, 0.30, 0.22], False),
+        ("sol", "◎ SOL · SOLANA", "$122.06", "+3.3%", C_SOLANA, C_GREEN, [0.3, 0.35, 0.32, 0.45, 0.48, 0.58, 0.55, 0.68, 0.72, 0.82, 0.78, 0.88, 0.85, 0.94, 0.91, 0.97], False),
+        ("doge", "Ð DOGE · DOGECOIN", "$0.0989", "+2.7%", C_DOGE, C_GREEN, [0.4, 0.42, 0.38, 0.50, 0.52, 0.60, 0.58, 0.68, 0.65, 0.75, 0.72, 0.82, 0.80, 0.88, 0.85, 0.91], False),
+        ("pepe", "🐸 PEPE · PEPE", "$0.0000045", "+0.7%", C_PEPE, C_GREEN, [0.5, 0.48, 0.52, 0.55, 0.53, 0.62, 0.60, 0.68, 0.65, 0.72, 0.70, 0.76, 0.74, 0.79, 0.77, 0.82], False),
+    ]
 
-    c2 = (m + card_w + gap, curr_y)
-    draw_card(draw, c2[0], c2[1], card_w, card_h, "Ξ ETH", C_ETH, "-0.2%", C_RED)
-    draw.text((c2[0] + 8, c2[1] + 32), "$2,691", fill=C_ETH, font=get_font(13, bold=True))
-    draw.text((c2[0] + card_w - 55, c2[1] + 32), "-0.2%", fill=C_RED, font=f_bold)
-    eth_pts = [(c2[0] + 10 + i * step, c2[1] + 85 - v * 30) for i, v in enumerate(pts[::-1])]
-    for i in range(len(eth_pts) - 1):
-        draw.line([eth_pts[i], eth_pts[i+1]], fill=C_ETH, width=2)
-    draw.text((c2[0] + 8, c2[1] + card_h - 14), "H $2,740  L $2,667", fill=C_TEXT_DIM, font=f_small)
+    for idx, (cid, title, price, chg, col, chg_col, pts, is_act) in enumerate(coins_data):
+        cx = m + idx * (crypto_w + gap)
+        draw_card_frame(draw, cx, curr_y, crypto_w, crypto_h, title, col, chg, chg_col, is_active=is_act)
+        draw.text((cx + 14, curr_y + 44), price, fill=col, font=f_hero)
+        draw.text((cx + crypto_w - 75, curr_y + 48), chg, fill=chg_col, font=f_sec_metric)
 
-    c3 = (m + (card_w + gap) * 2, curr_y)
-    draw_card(draw, c3[0], c3[1], card_w, card_h, "◎ SOL", C_SOLANA, "+3.3%", C_GREEN)
-    draw.text((c3[0] + 8, c3[1] + 32), "$122.06", fill=C_SOLANA, font=get_font(13, bold=True))
-    draw.text((c3[0] + card_w - 55, c3[1] + 32), "+3.3%", fill=C_GREEN, font=f_bold)
-    sol_pts = [(c3[0] + 10 + i * step, c3[1] + 85 - (0.3 + 0.6 * (i/len(pts))) * 35) for i in range(len(pts))]
-    for i in range(len(sol_pts) - 1):
-        draw.line([sol_pts[i], sol_pts[i+1]], fill=C_SOLANA, width=2)
-    draw.text((c3[0] + 8, c3[1] + card_h - 14), "H $122.75  L $115.92", fill=C_TEXT_DIM, font=f_small)
+        # High-res Sparkline
+        sp_x1 = cx + 14
+        sp_x2 = cx + crypto_w - 14
+        sp_y1 = curr_y + 76
+        sp_y2 = curr_y + crypto_h - 32
+        step = (sp_x2 - sp_x1) / (len(pts) - 1)
+        sp_pts = [(sp_x1 + i * step, sp_y2 - v * (sp_y2 - sp_y1)) for i, v in enumerate(pts)]
+        for i in range(len(sp_pts) - 1):
+            draw.line([sp_pts[i], sp_pts[i+1]], fill=col, width=2)
+        draw.ellipse([sp_pts[-1][0] - 3, sp_pts[-1][1] - 3, sp_pts[-1][0] + 3, sp_pts[-1][1] + 3], fill=col)
 
-    curr_y += card_h + gap + 8
+        draw.text((cx + 14, curr_y + crypto_h - 20), "24H H $85.2K  L $83.2K", fill=C_TEXT_DIM, font=f_meta)
+        draw.text((cx + crypto_w - 48, curr_y + crypto_h - 20), "SPOT", fill=C_TEXT_DIM, font=f_meta)
 
-    # 2. SECTION: AI USAGE
-    draw.text((m, curr_y), "─── [ AI USAGE ] ", fill=C_CORAL, font=f_sec)
-    draw.rectangle([w - 88, curr_y - 2, w - m, curr_y + 14], fill=(16, 24, 38), outline=C_ACTIVE_CYAN)
-    draw.text((w - 82, curr_y + 1), "🔍 FOCUS", fill=C_ACTIVE_CYAN, font=f_small)
-    draw.line([m + 100, curr_y + 6, w - 96, curr_y + 6], fill=(24, 32, 48), width=1)
-    curr_y += 18
+    curr_y += crypto_h + gap + 10
 
-    # CODEX, GEMINI, CLAUDE
-    a1 = (m, curr_y)
-    draw_card(draw, a1[0], a1[1], card_w, card_h, "CODEX", C_GREEN, "READY", C_GREEN)
-    draw.text((a1[0] + 8, a1[1] + 30), "5H", fill=C_TEXT_MUTED, font=f_bold)
-    draw.text((a1[0] + card_w - 65, a1[1] + 30), "100% LEFT", fill=C_GREEN, font=f_bold)
-    draw_segmented_bar(draw, a1[0] + 8, a1[1] + 43, card_w - 16, 5, 100, C_GREEN)
-    draw.text((a1[0] + 8, a1[1] + 55), "WEEK", fill=C_TEXT_MUTED, font=f_bold)
-    draw.text((a1[0] + card_w - 65, a1[1] + 55), "29% LEFT", fill=C_AMBER, font=f_bold)
-    draw_segmented_bar(draw, a1[0] + 8, a1[1] + 68, card_w - 16, 5, 29, C_AMBER)
-    draw.text((a1[0] + 8, a1[1] + card_h - 14), "GPT-5.6 · CHATGPT PLUS", fill=C_TEXT_DIM, font=f_small)
+    # 2. SECTION: AI USAGE (3 spacious cards)
+    draw.text((m, curr_y), "─── [ AI USAGE & SUBSCRIPTION QUOTAS ]", fill=C_CORAL, font=f_sec)
+    draw.rectangle([m + 375, curr_y - 4, m + 470, curr_y + 20], fill=(19, 27, 42), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((m + 387, curr_y + 1), "[ 🔍 FOCUS ]", fill=C_ACTIVE_CYAN, font=f_btn)
+    draw.line([m + 485, curr_y + 8, w - m, curr_y + 8], fill=(24, 32, 48), width=1)
+    curr_y += 30
 
-    a2 = (m + card_w + gap, curr_y)
-    draw_card(draw, a2[0], a2[1], card_w, card_h, "GEMINI", C_BLUE, "ACTIVE", C_GREEN)
-    draw.text((a2[0] + 8, a2[1] + 30), "5H", fill=C_TEXT_MUTED, font=f_bold)
-    draw.text((a2[0] + card_w - 65, a2[1] + 30), "73% LEFT", fill=C_GREEN, font=f_bold)
-    draw_segmented_bar(draw, a2[0] + 8, a2[1] + 43, card_w - 16, 5, 73, C_GREEN)
-    draw.text((a2[0] + 8, a2[1] + 55), "WEEK", fill=C_TEXT_MUTED, font=f_bold)
-    draw.text((a2[0] + card_w - 65, a2[1] + 55), "76% LEFT", fill=C_GREEN, font=f_bold)
-    draw_segmented_bar(draw, a2[0] + 8, a2[1] + 68, card_w - 16, 5, 76, C_GREEN)
-    draw.text((a2[0] + 8, a2[1] + card_h - 14), "GEMINI 3.8 · GOOGLE AI PRO", fill=C_TEXT_DIM, font=f_small)
+    ai_w = (w - 2 * m - 2 * gap) // 3
+    ai_h = 175
+    ai_data = [
+        ("CODEX CLI", C_GREEN, "READY", C_GREEN, "5H ROLLING", "100% LEFT", 100, "RESET: 5H 00M", "WEEKLY CAP", "29% LEFT", 29, "RESET: 1D 22H", "GPT-5.6 · CHATGPT PLUS TIER"),
+        ("GEMINI CODE ASSIST", C_BLUE, "ACTIVE", C_GREEN, "5H ROLLING", "73% LEFT", 73, "RESET: 4H 16M", "WEEKLY CAP", "76% LEFT", 76, "RESET: 6D 01H", "GEMINI 3.8 · GOOGLE AI PRO"),
+        ("CLAUDE PRO", C_CORAL, "ONLINE", C_GREEN, "5H ROLLING", "97% LEFT", 97, "RESET: NOW (CACHED)", "WEEKLY CAP", "62% LEFT", 62, "RESET: NOW (CACHED)", "no***@gmail.com · ANTHROPIC PRO"),
+    ]
 
-    a3 = (m + (card_w + gap) * 2, curr_y)
-    draw_card(draw, a3[0], a3[1], card_w, card_h, "CLAUDE", C_CORAL, "STALE", C_AMBER)
-    draw.text((a3[0] + 8, a3[1] + 30), "5H", fill=C_TEXT_MUTED, font=f_bold)
-    draw.text((a3[0] + card_w - 65, a3[1] + 30), "97% LEFT", fill=C_GREEN, font=f_bold)
-    draw_segmented_bar(draw, a3[0] + 8, a3[1] + 43, card_w - 16, 5, 97, C_GREEN)
-    draw.text((a3[0] + 8, a3[1] + 55), "WEEK", fill=C_TEXT_MUTED, font=f_bold)
-    draw.text((a3[0] + card_w - 65, a3[1] + 55), "62% LEFT", fill=C_GREEN, font=f_bold)
-    draw_segmented_bar(draw, a3[0] + 8, a3[1] + 68, card_w - 16, 5, 62, C_GREEN)
-    draw.text((a3[0] + 8, a3[1] + card_h - 14), "no***@gmail.com · PRO", fill=C_TEXT_DIM, font=f_small)
+    for idx, (title, col, bd, bd_col, p_lbl, p_val, p_pct, p_rst, s_lbl, s_val, s_pct, s_rst, foot) in enumerate(ai_data):
+        ax = m + idx * (ai_w + gap)
+        draw_card_frame(draw, ax, curr_y, ai_w, ai_h, title, col, bd, bd_col)
 
-    curr_y += card_h + gap + 8
+        # Primary Metric
+        draw.text((ax + 14, curr_y + 42), p_lbl, fill=C_TEXT_MUTED, font=f_meta)
+        draw.text((ax + ai_w - 120, curr_y + 38), p_val, fill=col, font=f_hero)
+        draw_segmented_bar(draw, ax + 14, curr_y + 68, ai_w - 28, 8, p_pct, col, segments=16)
+        draw.text((ax + 14, curr_y + 82), p_rst, fill=C_TEXT_DIM, font=f_meta)
 
-    # 3. SECTION: VOLATILE STOCKS SCANNER
-    draw.text((m, curr_y), "─── [ VOLATILE STOCKS SCANNER ] ", fill=C_ACTIVE_CYAN, font=f_sec)
-    draw.rectangle([w - 88, curr_y - 2, w - m, curr_y + 14], fill=(16, 24, 38), outline=C_ACTIVE_CYAN)
-    draw.text((w - 82, curr_y + 1), "🔍 FOCUS", fill=C_ACTIVE_CYAN, font=f_small)
-    draw.line([m + 175, curr_y + 6, w - 96, curr_y + 6], fill=(24, 32, 48), width=1)
-    curr_y += 18
+        # Secondary Metric
+        draw.text((ax + 14, curr_y + 106), s_lbl, fill=C_TEXT_MUTED, font=f_meta)
+        draw.text((ax + ai_w - 95, curr_y + 104), s_val, fill=C_GREEN if s_pct >= 30 else C_AMBER, font=f_sec_metric)
+        draw_segmented_bar(draw, ax + 14, curr_y + 124, ai_w - 28, 6, s_pct, C_GREEN if s_pct >= 30 else C_AMBER, segments=16)
+        draw.text((ax + 14, curr_y + 136), s_rst, fill=C_TEXT_DIM, font=f_meta)
 
-    # Wide Stocks Card
-    sw_w = w - m * 2
-    sw_h = 135
-    draw.rectangle([m, curr_y, m + sw_w, curr_y + sw_h], fill=C_CARD_BG, outline=C_ACTIVE_CYAN, width=1)
-    draw.text((m + 10, curr_y + 8), "TOP 10 MOST VOLATILE US STOCKS TODAY", fill=C_ACTIVE_CYAN, font=f_bold)
-    draw.rectangle([m + sw_w - 64, curr_y + 5, m + sw_w - 8, curr_y + 20], fill=(16, 24, 38), outline=C_GREEN)
-    draw.text((m + sw_w - 48, curr_y + 7), "OPEN", fill=C_GREEN, font=f_small)
+        draw.text((ax + 14, curr_y + ai_h - 18), foot, fill=C_TEXT_MUTED, font=f_meta)
+
+    curr_y += ai_h + gap + 10
+
+    # 3. SECTION: VOLATILE STOCKS SCANNER (Full Width Responsive Card)
+    draw.text((m, curr_y), "─── [ VOLATILE US EQUITIES SCANNER ]", fill=C_ACTIVE_CYAN, font=f_sec)
+    draw.rectangle([m + 355, curr_y - 4, m + 450, curr_y + 20], fill=(19, 27, 42), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((m + 367, curr_y + 1), "[ 🔍 FOCUS ]", fill=C_ACTIVE_CYAN, font=f_btn)
+    draw.line([m + 465, curr_y + 8, w - m, curr_y + 8], fill=(24, 32, 48), width=1)
+    curr_y += 30
+
+    stocks_w = w - 2 * m
+    stocks_h = 175
+    draw.rectangle([m, curr_y, m + stocks_w, curr_y + stocks_h], fill=C_CARD_BG, outline=C_ACTIVE_CYAN, width=1)
+
+    draw.text((m + 16, curr_y + 14), "TOP 10 MOST VOLATILE US EQUITIES (LIVE MARKET CRUMB FEED)", fill=C_ACTIVE_CYAN, font=f_sec)
+    draw.rectangle([m + stocks_w - 100, curr_y + 10, m + stocks_w - 14, curr_y + 30], fill=(16, 24, 38), outline=C_GREEN)
+    draw.text((m + stocks_w - 86, curr_y + 13), "MARKET OPEN", fill=C_GREEN, font=f_meta)
 
     stocks_sample = [
-        ("1", "DKNG", "$22.02", "+3.5%", "VOL 8.3%"),
-        ("2", "GME", "$23.39", "-6.5%", "VOL 7.6%"),
-        ("3", "MARA", "$12.55", "-2.9%", "VOL 6.4%"),
-        ("4", "RIOT", "$23.00", "-2.0%", "VOL 5.7%"),
-        ("5", "TSLA", "$372.11", "-1.5%", "VOL 5.1%"),
-        ("6", "ARM", "$310.32", "+1.3%", "VOL 5.0%"),
-        ("7", "SMCI", "$43.26", "+4.2%", "VOL 4.5%"),
-        ("8", "MSFT", "$516.17", "+3.7%", "VOL 4.4%"),
-        ("9", "MSTR", "$158.61", "-1.9%", "VOL 3.7%"),
-        ("10", "COIN", "$195.11", "-2.1%", "VOL 3.6%"),
+        ("1", "DKNG", "DraftKings Inc", "$22.02", "+3.5%", "VOL 8.3%"),
+        ("2", "GME", "GameStop Corp", "$23.39", "-6.5%", "VOL 7.6%"),
+        ("3", "MARA", "MARA Holdings", "$12.55", "-2.9%", "VOL 6.4%"),
+        ("4", "RIOT", "Riot Platforms", "$23.00", "-2.0%", "VOL 5.7%"),
+        ("5", "TSLA", "Tesla Inc", "$372.11", "-1.5%", "VOL 5.1%"),
+        ("6", "ARM", "Arm Holdings", "$310.32", "+1.3%", "VOL 5.0%"),
+        ("7", "SMCI", "Super Micro", "$43.26", "+4.2%", "VOL 4.5%"),
+        ("8", "MSFT", "Microsoft Corp", "$516.17", "+3.7%", "VOL 4.4%"),
+        ("9", "MSTR", "MicroStrategy", "$158.61", "-1.9%", "VOL 3.7%"),
+        ("10", "COIN", "Coinbase Global", "$195.11", "-2.1%", "VOL 3.6%"),
     ]
 
-    mid_x = m + sw_w // 2
-    for idx, (rk, sym, pr, chg, vol) in enumerate(stocks_sample[:5]):
-        ry = curr_y + 28 + idx * 18
-        draw.text((m + 12, ry), rk, fill=C_TEXT_DIM, font=f_small)
-        draw.text((m + 28, ry), sym, fill=C_TEXT_WHITE, font=f_bold)
-        draw.text((m + 85, ry), pr, fill=C_TEXT_MUTED, font=f_small)
-        draw.text((m + 175, ry), chg, fill=C_GREEN if "+" in chg else C_RED, font=f_bold)
-        draw.text((mid_x - 14, ry), vol, fill=C_ACTIVE_CYAN, font=f_bold)
+    mid_x = m + stocks_w // 2
+    row_h = 24
+    for idx, (rk, sym, name, pr, chg, vol) in enumerate(stocks_sample[:5]):
+        ry = curr_y + 44 + idx * row_h
+        draw.text((m + 20, ry), f"#{rk}", fill=C_TEXT_DIM, font=f_meta)
+        draw.text((m + 65, ry), sym, fill=C_TEXT_WHITE, font=f_sec_metric)
+        draw.text((m + 160, ry), name, fill=C_TEXT_MUTED, font=f_meta)
+        draw.text((m + 320, ry), pr, fill=C_TEXT_WHITE, font=f_meta)
+        draw.text((m + 420, ry), chg, fill=C_GREEN if "+" in chg else C_RED, font=f_sec_metric)
+        draw.text((mid_x - 30, ry), vol, fill=C_ACTIVE_CYAN, font=f_sec_metric)
 
-    draw.line([mid_x, curr_y + 24, mid_x, curr_y + sw_h - 16], fill=(24, 32, 48), width=1)
+    draw.line([mid_x, curr_y + 40, mid_x, curr_y + stocks_h - 30], fill=(24, 32, 48), width=1)
 
-    for idx, (rk, sym, pr, chg, vol) in enumerate(stocks_sample[5:]):
-        ry = curr_y + 28 + idx * 18
-        draw.text((mid_x + 12, ry), rk, fill=C_TEXT_DIM, font=f_small)
-        draw.text((mid_x + 30, ry), sym, fill=C_TEXT_WHITE, font=f_bold)
-        draw.text((mid_x + 90, ry), pr, fill=C_TEXT_MUTED, font=f_small)
-        draw.text((mid_x + 180, ry), chg, fill=C_GREEN if "+" in chg else C_RED, font=f_bold)
-        draw.text((m + sw_w - 14, ry), vol, fill=C_ACTIVE_CYAN, font=f_bold)
+    for idx, (rk, sym, name, pr, chg, vol) in enumerate(stocks_sample[5:]):
+        ry = curr_y + 44 + idx * row_h
+        draw.text((mid_x + 30, ry), f"#{rk}", fill=C_TEXT_DIM, font=f_meta)
+        draw.text((mid_x + 75, ry), sym, fill=C_TEXT_WHITE, font=f_sec_metric)
+        draw.text((mid_x + 170, ry), name, fill=C_TEXT_MUTED, font=f_meta)
+        draw.text((mid_x + 330, ry), pr, fill=C_TEXT_WHITE, font=f_meta)
+        draw.text((mid_x + 430, ry), chg, fill=C_GREEN if "+" in chg else C_RED, font=f_sec_metric)
+        draw.text((m + stocks_w - 30, ry), vol, fill=C_ACTIVE_CYAN, font=f_sec_metric)
 
-    draw.text((m + 10, curr_y + sw_h - 12), "METRIC: Intraday Range % = (High - Low) / PrevClose · YahooFinance Public Crumb API", fill=C_TEXT_DIM, font=f_small)
+    draw.text((m + 16, curr_y + stocks_h - 18), "METRIC: Intraday Range % = (High - Low) / PrevClose · YahooFinance High-Frequency Poller", fill=C_TEXT_DIM, font=f_meta)
 
-    curr_y += sw_h + gap + 8
+    curr_y += stocks_h + gap + 10
 
-    # 4. SECTION: SYSTEM & SERVICES
-    draw.text((m, curr_y), "─── [ SYSTEM & SERVICES ] ", fill=C_BLUE, font=f_sec)
-    draw.rectangle([w - 88, curr_y - 2, w - m, curr_y + 14], fill=(16, 24, 38), outline=C_ACTIVE_CYAN)
-    draw.text((w - 82, curr_y + 1), "🔍 FOCUS", fill=C_ACTIVE_CYAN, font=f_small)
-    draw.line([m + 150, curr_y + 6, w - 96, curr_y + 6], fill=(24, 32, 48), width=1)
-    curr_y += 18
+    # 4. SECTION: SYSTEM & SERVICES (3 Cards)
+    draw.text((m, curr_y), "─── [ LOCAL HARDWARE & SYSTEM SERVICES ]", fill=C_GREEN, font=f_sec)
+    draw.rectangle([m + 375, curr_y - 4, m + 470, curr_y + 20], fill=(19, 27, 42), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((m + 387, curr_y + 1), "[ 🔍 FOCUS ]", fill=C_ACTIVE_CYAN, font=f_btn)
+    draw.line([m + 485, curr_y + 8, w - m, curr_y + 8], fill=(24, 32, 48), width=1)
+    curr_y += 30
 
-    # Local PC & DGX Spark
-    s1 = (m, curr_y)
-    draw_card(draw, s1[0], s1[1], card_w, 110, "LOCAL PC", (55, 195, 245), "ONLINE", C_GREEN)
-    draw.text((s1[0] + 8, s1[1] + 30), "GPU", fill=C_TEXT_MUTED, font=f_bold)
-    draw.text((s1[0] + card_w - 50, s1[1] + 30), "3%", fill=C_GREEN, font=f_bold)
-    draw_segmented_bar(draw, s1[0] + 8, s1[1] + 44, card_w - 16, 5, 3, C_GREEN)
-    draw.text((s1[0] + 8, s1[1] + 56), "TEMP 38C  VRAM 3.0G", fill=C_TEXT_DIM, font=f_small)
-    draw.text((s1[0] + 8, s1[1] + 70), "RAM 44%", fill=C_TEXT_MUTED, font=f_small)
-    draw.text((s1[0] + 8, s1[1] + 92), "RTX 5080 · 16G", fill=C_TEXT_DIM, font=f_small)
+    sys_w = (w - 2 * m - 2 * gap) // 3
+    sys_h = 160
 
-    s2 = (m + card_w + gap, curr_y)
-    draw_card(draw, s2[0], s2[1], card_w, 110, "DGX SPARK", C_NVIDIA, "ONLINE", C_GREEN)
-    draw.text((s2[0] + 8, s2[1] + 30), "GPU", fill=C_TEXT_MUTED, font=f_bold)
-    draw.text((s2[0] + card_w - 50, s2[1] + 30), "0%", fill=C_GREEN, font=f_bold)
-    draw_segmented_bar(draw, s2[0] + 8, s2[1] + 44, card_w - 16, 5, 0, C_GREEN)
-    draw.text((s2[0] + 8, s2[1] + 56), "TEMP 39C  LOAD 1.72", fill=C_TEXT_DIM, font=f_small)
-    draw.text((s2[0] + 8, s2[1] + 70), "RAM 40%", fill=C_TEXT_MUTED, font=f_small)
-    draw.text((s2[0] + 8, s2[1] + 92), "GB10 · SPARK LIVE", fill=C_TEXT_DIM, font=f_small)
+    # Local PC
+    s1 = m
+    draw_card_frame(draw, s1, curr_y, sys_w, sys_h, "LOCAL WORKSTATION", (55, 195, 245), "ONLINE", C_GREEN)
+    draw.text((s1 + 14, curr_y + 40), "GPU LOAD", fill=C_TEXT_MUTED, font=f_meta)
+    draw.text((s1 + sys_w - 60, curr_y + 36), "3%", fill=C_GREEN, font=f_hero)
+    draw_segmented_bar(draw, s1 + 14, curr_y + 64, sys_w - 28, 8, 3, C_GREEN, segments=16)
+    draw.text((s1 + 14, curr_y + 80), "SYSTEM RAM", fill=C_TEXT_MUTED, font=f_meta)
+    draw.text((s1 + sys_w - 60, curr_y + 78), "44%", fill=C_BLUE, font=f_sec_metric)
+    draw_segmented_bar(draw, s1 + 14, curr_y + 98, sys_w - 28, 6, 44, C_BLUE, segments=16)
+    draw.text((s1 + 14, curr_y + sys_h - 20), "RTX 5080 · 16GB VRAM · 16 CORES ACTIVE", fill=C_TEXT_DIM, font=f_meta)
 
-    s3 = (m + (card_w + gap) * 2, curr_y)
-    draw_card(draw, s3[0], s3[1], card_w, 110, "SERVICES", C_GREEN, "ONLINE", C_GREEN)
-    svcs = [("DGX (SSH)", True), ("OLLAMA", True), ("COMFYUI", True), ("FORGE3D", True)]
-    sy = s3[1] + 30
-    for s_name, s_up in svcs:
-        draw.ellipse([s3[0] + 10, sy + 3, s3[0] + 16, sy + 9], fill=C_GREEN if s_up else C_RED)
-        draw.text((s3[0] + 22, sy), s_name, fill=C_TEXT_WHITE, font=f_small)
-        sy += 16
-    draw.text((s3[0] + 8, s3[1] + 92), "TAILSCALE WORKSTATION", fill=C_TEXT_DIM, font=f_small)
+    # DGX Spark
+    s2 = m + sys_w + gap
+    draw_card_frame(draw, s2, curr_y, sys_w, sys_h, "NVIDIA DGX SPARK CLUSTER", C_NVIDIA, "ONLINE", C_GREEN)
+    draw.text((s2 + 14, curr_y + 40), "CLUSTER GPU LOAD", fill=C_TEXT_MUTED, font=f_meta)
+    draw.text((s2 + sys_w - 60, curr_y + 36), "0%", fill=C_GREEN, font=f_hero)
+    draw_segmented_bar(draw, s2 + 14, curr_y + 64, sys_w - 28, 8, 0, C_GREEN, segments=16)
+    draw.text((s2 + 14, curr_y + 80), "TEMP 39°C  LOAD AVG 1.72  RAM 40%", fill=C_TEXT_MUTED, font=f_meta)
+    draw.text((s2 + 14, curr_y + sys_h - 20), "ssh://dgx-spark · GB10 ARCHITECTURE", fill=C_TEXT_DIM, font=f_meta)
+
+    # Services
+    s3 = m + 2 * (sys_w + gap)
+    draw_card_frame(draw, s3, curr_y, sys_w, sys_h, "CORE SYSTEM DAEMONS", C_GREEN, "HEALTHY", C_GREEN)
+    svcs = [("DGX CLUSTER (SSH)", True), ("OLLAMA SERVER", True), ("COMFYUI DAEMON", True), ("FORGE3D SERVICE", True)]
+    for s_idx, (s_name, s_up) in enumerate(svcs):
+        sy = curr_y + 42 + s_idx * 24
+        draw.ellipse([s3 + 14, sy + 3, s3 + 22, sy + 11], fill=C_GREEN if s_up else C_RED)
+        draw.text((s3 + 28, sy), s_name, fill=C_TEXT_WHITE, font=f_meta)
+        draw.text((s3 + sys_w - 45, sy), "OK" if s_up else "DOWN", fill=C_GREEN if s_up else C_RED, font=f_btn)
+    draw.text((s3 + 14, curr_y + sys_h - 20), "TAILSCALE WORKSTATION MESH", fill=C_TEXT_DIM, font=f_meta)
+
+    # Footer Bar
+    draw.line([0, h - 36, w, h - 36], fill=(21, 29, 42), width=1)
+    draw.text((20, h - 24), "TARGET: [ MINITOO ]  |  ACTIVE PAGE: [ BTC ]  |  AUTO-CYCLE: ON", fill=C_ACTIVE_CYAN, font=f_btn)
+    draw.text((w - 20, h - 24), "HIGH-DPI SCALE: AUTO (100%)  |  Ctrl+, Settings  |  1..5 Presets  |  F11 Fullscreen  |  Esc Exit", fill=C_TEXT_DIM, font=f_meta, anchor="ra")
 
     img.save(out_path, "PNG")
-    print(f"Generated: {out_path}")
+    print(f"Generated 1080p: {out_path}")
 
 # ---------------------------------------------------------------------------
-# 2. PRESET CRYPTO SCREENSHOT (Hero cards: BTC, ETH, SOL, DOGE, PEPE)
+# 2. 1920x1080 FOCUS PRESENTATION SCREENSHOTS
 # ---------------------------------------------------------------------------
 def render_preset_crypto_screenshot(out_path: str):
-    """Renders CRYPTO hero preset with enlarged cards and high-res sparklines."""
-    w, h = 680, 520
+    """Renders 1080p CRYPTO hero focus mode with giant sparklines and high visual hierarchy."""
+    w, h = 1920, 1080
     img = Image.new("RGBA", (w, h), C_BG)
     draw = ImageDraw.Draw(img)
-    draw_header(draw, w, active_preset="CRYPTO")
+    draw_command_center_header(draw, w, active_preset="CRYPTO")
 
-    f_sec = get_font(10, bold=True)
-    f_bold = get_font(11, bold=True)
-    f_huge = get_font(16, bold=True)
-    f_small = get_font(9, bold=False)
+    f_huge_price = get_font(30, bold=True)
+    f_sec_metric = get_font(16, bold=True)
+    f_title = get_font(15, bold=True)
+    f_meta = get_font(11, bold=False)
 
-    curr_y = 74
-    m = 12
-    draw.text((m, curr_y), "─── [ FOCUS: CRYPTO MARKETS · REALTIME BINANCE FEED ] ", fill=C_GOLD, font=f_sec)
-    draw.line([m + 320, curr_y + 8, w - m, curr_y + 8], fill=(24, 32, 48), width=1)
-    curr_y += 24
+    m = 20
+    curr_y = 86
 
-    # Top row: 3 major coins (BTC, ETH, SOL) - larger cards
-    card_w = (w - m * 2 - 16) // 3
-    card_h = 185
-    gap = 8
+    # Focus Banner
+    draw.rectangle([m, curr_y, w - m, curr_y + 48], fill=(14, 22, 36), outline=C_ACTIVE_CYAN, width=1)
+    draw.rectangle([m + 8, curr_y + 8, m + 175, curr_y + 40], fill=(21, 38, 59), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((m + 22, curr_y + 14), "◀ BACK TO ALL (Esc)", fill=C_ACTIVE_CYAN, font=get_font(11, bold=True))
+    draw.text((m + 195, curr_y + 14), "FOCUS PRESENTATION MODE: CRYPTO MARKETS · REALTIME SPOT ASSETS", fill=C_GOLD, font=get_font(13, bold=True))
+    draw.text((w - m - 20, curr_y + 16), "FILMING & CREATOR MODE · 1080p COMMAND CENTER", fill=C_TEXT_DIM, font=f_meta, anchor="ra")
 
-    pts = [0.2, 0.28, 0.24, 0.42, 0.38, 0.52, 0.48, 0.65, 0.58, 0.72, 0.68, 0.85, 0.78, 0.92, 0.88, 0.95]
-    step = (card_w - 24) / (len(pts) - 1)
+    curr_y += 62
+    gap = 16
 
-    # 1. BTC
-    c1 = (m, curr_y)
-    draw_card(draw, c1[0], c1[1], card_w, card_h, "₿ BITCOIN (BTC)", C_GOLD, "-0.9%", C_RED, is_active=True)
-    draw.text((c1[0] + 12, c1[1] + 36), "$84,021", fill=C_GOLD, font=f_huge)
-    draw.text((c1[0] + card_w - 65, c1[1] + 40), "-0.9%", fill=C_RED, font=f_bold)
-    sp_pts = [(c1[0] + 12 + i * step, c1[1] + 130 - v * 55) for i, v in enumerate(pts)]
-    for i in range(len(sp_pts) - 1):
-        draw.line([sp_pts[i], sp_pts[i+1]], fill=C_GOLD, width=3)
-    draw.text((c1[0] + 12, c1[1] + card_h - 22), "HIGH: $85,208  LOW: $83,230", fill=C_TEXT_DIM, font=f_small)
+    # Top Row: 3 Major Assets (BTC, ETH, SOL)
+    top_w = (w - 2 * m - 2 * gap) // 3
+    top_h = 420
+    top_coins = [
+        ("₿ BITCOIN (BTC)", "$84,021.50", "-0.9%", C_GOLD, C_RED, [0.2, 0.28, 0.24, 0.42, 0.38, 0.52, 0.48, 0.65, 0.58, 0.72, 0.68, 0.85, 0.78, 0.92, 0.88, 0.95], True, "$85,208", "$83,230", "ON MINITOO"),
+        ("Ξ ETHEREUM (ETH)", "$2,691.40", "-0.2%", C_ETH, C_RED, [0.8, 0.72, 0.75, 0.62, 0.65, 0.55, 0.58, 0.48, 0.52, 0.42, 0.45, 0.35, 0.38, 0.28, 0.30, 0.22], False, "$2,740", "$2,667", "SPOT 24H"),
+        ("◎ SOLANA (SOL)", "$122.06", "+3.3%", C_SOLANA, C_GREEN, [0.3, 0.35, 0.32, 0.45, 0.48, 0.58, 0.55, 0.68, 0.72, 0.82, 0.78, 0.88, 0.85, 0.94, 0.91, 0.97], False, "$122.75", "$115.92", "SPOT 24H"),
+    ]
 
-    # 2. ETH
-    c2 = (m + card_w + gap, curr_y)
-    draw_card(draw, c2[0], c2[1], card_w, card_h, "Ξ ETHEREUM (ETH)", C_ETH, "-0.2%", C_RED)
-    draw.text((c2[0] + 12, c2[1] + 36), "$2,691.40", fill=C_ETH, font=f_huge)
-    draw.text((c2[0] + card_w - 65, c2[1] + 40), "-0.2%", fill=C_RED, font=f_bold)
-    eth_pts = [(c2[0] + 12 + i * step, c2[1] + 130 - v * 50) for i, v in enumerate(pts[::-1])]
-    for i in range(len(eth_pts) - 1):
-        draw.line([eth_pts[i], eth_pts[i+1]], fill=C_ETH, width=3)
-    draw.text((c2[0] + 12, c2[1] + card_h - 22), "HIGH: $2,740  LOW: $2,667", fill=C_TEXT_DIM, font=f_small)
+    for idx, (title, price, chg, col, chg_col, pts, is_act, hi, lo, tag) in enumerate(top_coins):
+        cx = m + idx * (top_w + gap)
+        draw.rectangle([cx, curr_y, cx + top_w, curr_y + top_h], fill=C_CARD_BG, outline=C_ACTIVE_CYAN if is_act else C_CARD_BORDER, width=2 if is_act else 1)
+        draw.text((cx + 18, curr_y + 18), title, fill=col, font=f_title)
 
-    # 3. SOL
-    c3 = (m + (card_w + gap) * 2, curr_y)
-    draw_card(draw, c3[0], c3[1], card_w, card_h, "◎ SOLANA (SOL)", C_SOLANA, "+3.3%", C_GREEN)
-    draw.text((c3[0] + 12, c3[1] + 36), "$122.06", fill=C_SOLANA, font=f_huge)
-    draw.text((c3[0] + card_w - 65, c3[1] + 40), "+3.3%", fill=C_GREEN, font=f_bold)
-    sol_pts = [(c3[0] + 12 + i * step, c3[1] + 130 - (0.2 + 0.7 * (i/len(pts))) * 55) for i in range(len(pts))]
-    for i in range(len(sol_pts) - 1):
-        draw.line([sol_pts[i], sol_pts[i+1]], fill=C_SOLANA, width=3)
-    draw.text((c3[0] + 12, c3[1] + card_h - 22), "HIGH: $122.75  LOW: $115.92", fill=C_TEXT_DIM, font=f_small)
+        draw.rectangle([cx + top_w - 105, curr_y + 14, cx + top_w - 14, curr_y + 36], fill=C_ACTIVE_TAG_BG if is_act else (22, 29, 43), outline=C_ACTIVE_CYAN if is_act else (37, 50, 73))
+        draw.text((cx + top_w - 95, curr_y + 18), tag, fill=C_ACTIVE_CYAN if is_act else C_TEXT_MUTED, font=get_font(10, bold=True))
 
-    curr_y += card_h + gap + 10
+        draw.text((cx + 18, curr_y + 58), price, fill=col, font=f_huge_price)
+        draw.text((cx + top_w - 90, curr_y + 68), chg, fill=chg_col, font=f_sec_metric)
 
-    # Bottom row: 2 alt/meme coins (DOGE, PEPE) - wide half-split cards
-    card_w2 = (w - m * 2 - gap) // 2
-    card_h2 = 175
-    step2 = (card_w2 - 24) / (len(pts) - 1)
+        # Giant 180px Sparkline
+        sp_x1 = cx + 18
+        sp_x2 = cx + top_w - 18
+        sp_y1 = curr_y + 115
+        sp_y2 = curr_y + top_h - 55
+        step = (sp_x2 - sp_x1) / (len(pts) - 1)
+        sp_pts = [(sp_x1 + i * step, sp_y2 - v * (sp_y2 - sp_y1)) for i, v in enumerate(pts)]
+        for i in range(len(sp_pts) - 1):
+            draw.line([sp_pts[i], sp_pts[i+1]], fill=col, width=3)
+        draw.ellipse([sp_pts[-1][0] - 4, sp_pts[-1][1] - 4, sp_pts[-1][0] + 4, sp_pts[-1][1] + 4], fill=col)
 
-    # 4. DOGE
-    d1 = (m, curr_y)
-    draw_card(draw, d1[0], d1[1], card_w2, card_h2, "Ð DOGECOIN (DOGE)", C_DOGE, "+2.7%", C_GREEN)
-    draw.text((d1[0] + 12, d1[1] + 36), "$0.09892", fill=C_DOGE, font=f_huge)
-    draw.text((d1[0] + card_w2 - 70, d1[1] + 40), "+2.7%", fill=C_GREEN, font=f_bold)
-    doge_pts = [(d1[0] + 12 + i * step2, d1[1] + 125 - (0.3 + 0.5 * (i/len(pts))) * 50) for i in range(len(pts))]
-    for i in range(len(doge_pts) - 1):
-        draw.line([doge_pts[i], doge_pts[i+1]], fill=C_DOGE, width=3)
-    draw.text((d1[0] + 12, d1[1] + card_h2 - 20), "HIGH: $0.09971  LOW: $0.09460  VOL: 1.2B DOGE", fill=C_TEXT_DIM, font=f_small)
+        draw.text((cx + 18, curr_y + top_h - 26), f"24H HIGH: {hi}   LOW: {lo}", fill=C_TEXT_DIM, font=f_meta)
+        draw.text((cx + top_w - 18, curr_y + top_h - 26), "COINGECKO SPOT", fill=C_TEXT_DIM, font=f_meta, anchor="ra")
 
-    # 5. PEPE
-    d2 = (m + card_w2 + gap, curr_y)
-    draw_card(draw, d2[0], d2[1], card_w2, card_h2, "🐸 PEPE (PEPE)", C_PEPE, "+0.7%", C_GREEN)
-    draw.text((d2[0] + 12, d2[1] + 36), "$0.00000452", fill=C_PEPE, font=f_huge)
-    draw.text((d2[0] + card_w2 - 70, d2[1] + 40), "+0.7%", fill=C_GREEN, font=f_bold)
-    pepe_pts = [(d2[0] + 12 + i * step2, d2[1] + 125 - (0.2 + 0.6 * (i/len(pts))) * 50) for i in range(len(pts))]
-    for i in range(len(pepe_pts) - 1):
-        draw.line([pepe_pts[i], pepe_pts[i+1]], fill=C_PEPE, width=3)
-    draw.text((d2[0] + 12, d2[1] + card_h2 - 20), "MICRO TOKEN  ·  $4.52u  ·  VOL: 8.4T PEPE", fill=C_TEXT_DIM, font=f_small)
+    curr_y += top_h + gap
+
+    # Bottom Row: 2 Alt/Meme Assets (DOGE, PEPE)
+    bot_w = (w - 2 * m - gap) // 2
+    bot_h = 420
+    bot_coins = [
+        ("Ð DOGECOIN (DOGE)", "$0.09892", "+2.7%", C_DOGE, C_GREEN, [0.4, 0.42, 0.38, 0.50, 0.52, 0.60, 0.58, 0.68, 0.65, 0.75, 0.72, 0.82, 0.80, 0.88, 0.85, 0.91], "$0.09971", "$0.09460", "VOL: 1.2B DOGE"),
+        ("🐸 PEPE (PEPE)", "$0.00000452", "+0.7%", C_PEPE, C_GREEN, [0.5, 0.48, 0.52, 0.55, 0.53, 0.62, 0.60, 0.68, 0.65, 0.72, 0.70, 0.76, 0.74, 0.79, 0.77, 0.82], "$0.00000468", "$0.00000438", "VOL: 8.4T PEPE"),
+    ]
+
+    for idx, (title, price, chg, col, chg_col, pts, hi, lo, vol) in enumerate(bot_coins):
+        cx = m + idx * (bot_w + gap)
+        draw.rectangle([cx, curr_y, cx + bot_w, curr_y + bot_h], fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
+        draw.text((cx + 18, curr_y + 18), title, fill=col, font=f_title)
+        draw.text((cx + 18, curr_y + 58), price, fill=col, font=f_huge_price)
+        draw.text((cx + bot_w - 90, curr_y + 68), chg, fill=chg_col, font=f_sec_metric)
+
+        sp_x1 = cx + 18
+        sp_x2 = cx + bot_w - 18
+        sp_y1 = curr_y + 115
+        sp_y2 = curr_y + bot_h - 55
+        step = (sp_x2 - sp_x1) / (len(pts) - 1)
+        sp_pts = [(sp_x1 + i * step, sp_y2 - v * (sp_y2 - sp_y1)) for i, v in enumerate(pts)]
+        for i in range(len(sp_pts) - 1):
+            draw.line([sp_pts[i], sp_pts[i+1]], fill=col, width=3)
+        draw.ellipse([sp_pts[-1][0] - 4, sp_pts[-1][1] - 4, sp_pts[-1][0] + 4, sp_pts[-1][1] + 4], fill=col)
+
+        draw.text((cx + 18, curr_y + bot_h - 26), f"24H HIGH: {hi}   LOW: {lo}   |   {vol}", fill=C_TEXT_DIM, font=f_meta)
+        draw.text((cx + bot_w - 18, curr_y + bot_h - 26), "BINANCE API SPOT FEED", fill=C_TEXT_DIM, font=f_meta, anchor="ra")
 
     img.save(out_path, "PNG")
-    print(f"Generated: {out_path}")
+    print(f"Generated 1080p: {out_path}")
 
-# ---------------------------------------------------------------------------
-# 3. PRESET STOCKS SCREENSHOT (Top Volatile Stocks Scanner)
-# ---------------------------------------------------------------------------
 def render_preset_stocks_screenshot(out_path: str):
-    """Renders STOCKS hero preset emphasizing price, day %, and volatility."""
-    w, h = 680, 520
+    """Renders 1080p STOCKS hero preset scanner terminal."""
+    w, h = 1920, 1080
     img = Image.new("RGBA", (w, h), C_BG)
     draw = ImageDraw.Draw(img)
-    draw_header(draw, w, active_preset="STOCKS")
+    draw_command_center_header(draw, w, active_preset="STOCKS")
 
-    f_sec = get_font(10, bold=True)
-    f_bold = get_font(11, bold=True)
-    f_huge = get_font(13, bold=True)
-    f_small = get_font(9, bold=False)
+    f_title = get_font(15, bold=True)
+    f_btn = get_font(11, bold=True)
+    f_sec_metric = get_font(14, bold=True)
+    f_meta = get_font(11, bold=False)
 
-    curr_y = 74
-    m = 12
-    draw.text((m, curr_y), "─── [ FOCUS: US EQUITIES VOLATILITY SCANNER ] ", fill=C_ACTIVE_CYAN, font=f_sec)
-    draw.line([m + 300, curr_y + 8, w - m, curr_y + 8], fill=(24, 32, 48), width=1)
-    curr_y += 24
+    m = 20
+    curr_y = 86
 
-    sw_w = w - m * 2
-    sw_h = 390
-    draw.rectangle([m, curr_y, m + sw_w, curr_y + sw_h], fill=C_CARD_BG, outline=C_ACTIVE_CYAN, width=2)
+    draw.rectangle([m, curr_y, w - m, curr_y + 48], fill=(14, 22, 36), outline=C_ACTIVE_CYAN, width=1)
+    draw.rectangle([m + 8, curr_y + 8, m + 175, curr_y + 40], fill=(21, 38, 59), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((m + 22, curr_y + 14), "◀ BACK TO ALL (Esc)", fill=C_ACTIVE_CYAN, font=f_btn)
+    draw.text((m + 195, curr_y + 14), "FOCUS PRESENTATION MODE: TOP 10 VOLATILE US STOCKS SCANNER", fill=C_ACTIVE_CYAN, font=f_title)
+    draw.text((w - m - 20, curr_y + 16), "OBJECTIVE INTRADAY HIGH-LOW RANGE RANKING · YAHOO CRUMB API", fill=C_TEXT_DIM, font=f_meta, anchor="ra")
 
-    # Title bar
-    draw.text((m + 16, curr_y + 12), "TOP 10 MOST VOLATILE US EQUITIES (LIVE MARKET CRUMB FEED)", fill=C_ACTIVE_CYAN, font=f_huge)
-    draw.rectangle([m + sw_w - 90, curr_y + 10, m + sw_w - 12, curr_y + 30], fill=(16, 24, 38), outline=C_GREEN)
-    draw.ellipse([m + sw_w - 84, curr_y + 17, m + sw_w - 78, curr_y + 23], fill=C_GREEN)
-    draw.text((m + sw_w - 72, curr_y + 13), "MARKET OPEN", fill=C_GREEN, font=f_small)
+    curr_y += 62
+    stocks_w = w - 2 * m
+    stocks_h = 880
 
-    draw.line([m + 8, curr_y + 40, m + sw_w - 8, curr_y + 40], fill=(28, 38, 56), width=1)
-
-    stocks_data = [
-        ("1", "DKNG", "DraftKings Inc", "$22.02", "+3.5%", "VOL: 8.3%", "$20.30 - $22.15"),
-        ("2", "GME", "GameStop Corp", "$23.39", "-6.5%", "VOL: 7.6%", "$22.80 - $24.70"),
-        ("3", "MARA", "MARA Holdings", "$12.55", "-2.9%", "VOL: 6.4%", "$12.10 - $12.90"),
-        ("4", "RIOT", "Riot Platforms", "$23.00", "-2.0%", "VOL: 5.7%", "$22.40 - $23.70"),
-        ("5", "TSLA", "Tesla Inc", "$372.11", "-1.5%", "VOL: 5.1%", "$364.50 - $383.20"),
-        ("6", "ARM", "Arm Holdings", "$310.32", "+1.3%", "VOL: 5.0%", "$302.10 - $317.50"),
-        ("7", "SMCI", "Super Micro", "$43.26", "+4.2%", "VOL: 4.5%", "$41.50 - $43.40"),
-        ("8", "MSFT", "Microsoft Corp", "$516.17", "+3.7%", "VOL: 4.4%", "$505.00 - $527.10"),
-        ("9", "MSTR", "MicroStrategy", "$158.61", "-1.9%", "VOL: 3.7%", "$153.20 - $159.00"),
-        ("10", "COIN", "Coinbase Global", "$195.11", "-2.1%", "VOL: 3.6%", "$191.00 - $198.00"),
-    ]
+    draw.rectangle([m, curr_y, m + stocks_w, curr_y + stocks_h], fill=C_CARD_BG, outline=C_ACTIVE_CYAN, width=2)
 
     # Table Header
-    hy = curr_y + 48
-    draw.text((m + 16, hy), "RANK", fill=C_TEXT_DIM, font=f_small)
-    draw.text((m + 65, hy), "TICKER", fill=C_TEXT_DIM, font=f_small)
-    draw.text((m + 140, hy), "NAME", fill=C_TEXT_DIM, font=f_small)
-    draw.text((m + 280, hy), "LAST PRICE", fill=C_TEXT_DIM, font=f_small)
-    draw.text((m + 380, hy), "DAY CHANGE", fill=C_TEXT_DIM, font=f_small)
-    draw.text((m + 480, hy), "INTRADAY RANGE", fill=C_TEXT_DIM, font=f_small)
-    draw.text((m + sw_w - 90, hy), "VOLATILITY", fill=C_TEXT_DIM, font=f_small)
+    hy = curr_y + 24
+    draw.text((m + 30, hy), "RANK", fill=C_TEXT_DIM, font=f_meta)
+    draw.text((m + 110, hy), "TICKER", fill=C_TEXT_DIM, font=f_meta)
+    draw.text((m + 230, hy), "COMPANY NAME", fill=C_TEXT_DIM, font=f_meta)
+    draw.text((m + 530, hy), "LAST PRICE", fill=C_TEXT_DIM, font=f_meta)
+    draw.text((m + 720, hy), "DAY CHANGE", fill=C_TEXT_DIM, font=f_meta)
+    draw.text((m + 920, hy), "INTRADAY RANGE (HIGH - LOW)", fill=C_TEXT_DIM, font=f_meta)
+    draw.text((m + 1320, hy), "VOLATILITY METER", fill=C_TEXT_DIM, font=f_meta)
+    draw.text((m + stocks_w - 180, hy), "INTRADAY VOLATILITY", fill=C_TEXT_DIM, font=f_meta)
 
-    draw.line([m + 12, hy + 18, m + sw_w - 12, hy + 18], fill=(24, 32, 48), width=1)
+    draw.line([m + 20, hy + 28, m + stocks_w - 20, hy + 28], fill=(28, 38, 56), width=1)
 
-    for idx, (rk, sym, name, pr, chg, vol, rng) in enumerate(stocks_data):
-        ry = hy + 26 + idx * 28
+    stocks_data = [
+        ("1", "DKNG", "DraftKings Inc", "$22.02", "+3.5%", "$20.30 - $22.15", 8.3),
+        ("2", "GME", "GameStop Corp", "$23.39", "-6.5%", "$22.80 - $24.70", 7.6),
+        ("3", "MARA", "MARA Holdings", "$12.55", "-2.9%", "$12.10 - $12.90", 6.4),
+        ("4", "RIOT", "Riot Platforms", "$23.00", "-2.0%", "$22.40 - $23.70", 5.7),
+        ("5", "TSLA", "Tesla Inc", "$372.11", "-1.5%", "$364.50 - $383.20", 5.1),
+        ("6", "ARM", "Arm Holdings", "$310.32", "+1.3%", "$302.10 - $317.50", 5.0),
+        ("7", "SMCI", "Super Micro Computer", "$43.26", "+4.2%", "$41.50 - $43.40", 4.5),
+        ("8", "MSFT", "Microsoft Corp", "$516.17", "+3.7%", "$505.00 - $527.10", 4.4),
+        ("9", "MSTR", "MicroStrategy Inc", "$158.61", "-1.9%", "$153.20 - $159.00", 3.7),
+        ("10", "COIN", "Coinbase Global", "$195.11", "-2.1%", "$191.00 - $198.00", 3.6),
+    ]
+
+    for idx, (rk, sym, name, pr, chg, rng, vol) in enumerate(stocks_data):
+        ry = hy + 45 + idx * 72
         row_bg = (19, 27, 42) if idx % 2 == 0 else (14, 19, 30)
-        draw.rectangle([m + 10, ry - 4, m + sw_w - 10, ry + 22], fill=row_bg)
+        draw.rectangle([m + 16, ry - 10, m + stocks_w - 16, ry + 50], fill=row_bg, outline=(24, 34, 52), width=1)
 
-        draw.text((m + 22, ry + 2), rk, fill=C_TEXT_DIM, font=f_small)
-        draw.text((m + 65, ry + 1), sym, fill=C_ACTIVE_CYAN, font=f_bold)
-        draw.text((m + 140, ry + 2), name, fill=C_TEXT_MUTED, font=f_small)
-        draw.text((m + 280, ry + 1), pr, fill=C_TEXT_WHITE, font=f_bold)
-        draw.text((m + 380, ry + 1), chg, fill=C_GREEN if "+" in chg else C_RED, font=f_bold)
-        draw.text((m + 480, ry + 2), rng, fill=C_TEXT_MUTED, font=f_small)
-        draw.text((m + sw_w - 85, ry + 1), vol, fill=C_ACTIVE_CYAN, font=f_bold)
+        draw.text((m + 35, ry + 12), f"#{rk}", fill=C_TEXT_DIM, font=f_sec_metric)
+        draw.text((m + 110, ry + 10), sym, fill=C_ACTIVE_CYAN, font=get_font(18, bold=True))
+        draw.text((m + 230, ry + 12), name, fill=C_TEXT_WHITE, font=f_sec_metric)
+        draw.text((m + 530, ry + 10), pr, fill=C_TEXT_WHITE, font=get_font(16, bold=True))
+        draw.text((m + 720, ry + 10), chg, fill=C_GREEN if "+" in chg else C_RED, font=get_font(16, bold=True))
+        draw.text((m + 920, ry + 12), rng, fill=C_TEXT_MUTED, font=f_meta)
 
-    draw.text((m + 16, curr_y + sw_h - 16), "CRUMB API: Authenticated Yahoo Finance Scraping · Refresh: 60s · Range = (H - L) / PrevClose", fill=C_TEXT_DIM, font=f_small)
+        # Range bar
+        bar_w = 260
+        meter_x = m + 1320
+        meter_pct = min(100.0, (vol / 10.0) * 100.0)
+        draw_segmented_bar(draw, meter_x, ry + 15, bar_w, 12, meter_pct, C_ACTIVE_CYAN, segments=18)
+
+        draw.text((m + stocks_w - 170, ry + 10), f"VOL {vol:.1f}%", fill=C_ACTIVE_CYAN, font=get_font(16, bold=True))
+
+    draw.text((m + 30, curr_y + stocks_h - 25), "METRIC FORMULA: Intraday Range % = (High - Low) / PrevClose · Yahoo Finance Authenticated Crumb API (60s Cadence)", fill=C_TEXT_DIM, font=f_meta)
 
     img.save(out_path, "PNG")
-    print(f"Generated: {out_path}")
+    print(f"Generated 1080p: {out_path}")
 
-# ---------------------------------------------------------------------------
-# 4. PRESET AI SCREENSHOT (Codex, Gemini, Claude + AI Activity)
-# ---------------------------------------------------------------------------
 def render_preset_ai_screenshot(out_path: str):
-    """Renders AI hero preset emphasizing Quota LEFT %, Reset time, and Agent state."""
-    w, h = 680, 520
+    """Renders 1080p AI hero focus mode with giant gauges and local agent activity."""
+    w, h = 1920, 1080
     img = Image.new("RGBA", (w, h), C_BG)
     draw = ImageDraw.Draw(img)
-    draw_header(draw, w, active_preset="AI")
+    draw_command_center_header(draw, w, active_preset="AI")
 
-    f_sec = get_font(10, bold=True)
-    f_bold = get_font(11, bold=True)
-    f_huge = get_font(18, bold=True)
-    f_small = get_font(9, bold=False)
+    f_title = get_font(15, bold=True)
+    f_btn = get_font(11, bold=True)
+    f_huge = get_font(28, bold=True)
+    f_sec_metric = get_font(15, bold=True)
+    f_meta = get_font(11, bold=False)
 
-    curr_y = 74
-    m = 12
-    draw.text((m, curr_y), "─── [ FOCUS: AI SUBSCRIPTION QUOTAS & LOCAL AGENT ACTIVITY ] ", fill=C_CORAL, font=f_sec)
-    draw.line([m + 370, curr_y + 8, w - m, curr_y + 8], fill=(24, 32, 48), width=1)
-    curr_y += 24
+    m = 20
+    curr_y = 86
 
-    card_w = (w - m * 2 - 16) // 3
-    card_h = 240
-    gap = 8
+    draw.rectangle([m, curr_y, w - m, curr_y + 48], fill=(14, 22, 36), outline=C_ACTIVE_CYAN, width=1)
+    draw.rectangle([m + 8, curr_y + 8, m + 175, curr_y + 40], fill=(21, 38, 59), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((m + 22, curr_y + 14), "◀ BACK TO ALL (Esc)", fill=C_ACTIVE_CYAN, font=f_btn)
+    draw.text((m + 195, curr_y + 14), "FOCUS PRESENTATION MODE: AI SUBSCRIPTION QUOTAS & AGENT RUNTIME", fill=C_CORAL, font=f_title)
+    draw.text((w - m - 20, curr_y + 16), "AUTHORITATIVE % LEFT QUOTAS · ZERO GUESSTIMATION", fill=C_TEXT_DIM, font=f_meta, anchor="ra")
 
-    # 1. CODEX
-    a1 = (m, curr_y)
-    draw_card(draw, a1[0], a1[1], card_w, card_h, "CODEX CLI", C_GREEN, "READY", C_GREEN)
-    draw.text((a1[0] + 12, a1[1] + 36), "100%", fill=C_GREEN, font=f_huge)
-    draw.text((a1[0] + 80, a1[1] + 42), "LEFT", fill=C_GREEN, font=f_bold)
-    draw.text((a1[0] + card_w - 75, a1[1] + 42), "5H ROLLING", fill=C_TEXT_DIM, font=f_small)
-    draw_segmented_bar(draw, a1[0] + 12, a1[1] + 68, card_w - 24, 8, 100, C_GREEN)
-    draw.text((a1[0] + 12, a1[1] + 84), "RESET IN: 5H 00M", fill=C_TEXT_MUTED, font=f_small)
+    curr_y += 62
+    gap = 16
 
-    draw.line([a1[0] + 12, a1[1] + 104, a1[0] + card_w - 12, a1[1] + 104], fill=(24, 32, 48), width=1)
+    # 3 Giant Cards for OpenAI Codex, Google Gemini, Anthropic Claude
+    card_w = (w - 2 * m - 2 * gap) // 3
+    card_h = 520
 
-    draw.text((a1[0] + 12, a1[1] + 116), "29%", fill=C_AMBER, font=f_huge)
-    draw.text((a1[0] + 65, a1[1] + 122), "LEFT", fill=C_AMBER, font=f_bold)
-    draw.text((a1[0] + card_w - 75, a1[1] + 122), "WEEKLY CAP", fill=C_TEXT_DIM, font=f_small)
-    draw_segmented_bar(draw, a1[0] + 12, a1[1] + 148, card_w - 24, 8, 29, C_AMBER)
-    draw.text((a1[0] + 12, a1[1] + 164), "RESET IN: 1D 22H", fill=C_TEXT_MUTED, font=f_small)
-    draw.text((a1[0] + 12, a1[1] + card_h - 22), "GPT-5.6 · CHATGPT PLUS TIER", fill=C_TEXT_DIM, font=f_small)
+    ai_focus_data = [
+        ("CODEX CLI (OPENAI)", C_GREEN, "READY", C_GREEN, "5H ROLLING LIMIT", "100% LEFT", 100, "RESET: 5H 00M", "WEEKLY CAP", "29% LEFT", 29, "RESET: 1D 22H", "GPT-5.6 · CHATGPT PLUS SUBSCRIPTION"),
+        ("GEMINI CODE ASSIST (GOOGLE)", C_BLUE, "ACTIVE", C_GREEN, "5H ROLLING LIMIT", "73% LEFT", 73, "RESET: 4H 16M", "WEEKLY CAP", "76% LEFT", 76, "RESET: 6D 01H", "GEMINI 3.8 · GOOGLE AI PRO WORKSPACE"),
+        ("CLAUDE PRO (ANTHROPIC)", C_CORAL, "STALE", C_AMBER, "5H ROLLING LIMIT", "97% LEFT", 97, "RESET: NOW (CACHED)", "WEEKLY CAP", "62% LEFT", 62, "RESET: NOW (CACHED)", "no***@gmail.com · ANTHROPIC PRO"),
+    ]
 
-    # 2. GEMINI
-    a2 = (m + card_w + gap, curr_y)
-    draw_card(draw, a2[0], a2[1], card_w, card_h, "GEMINI CODE ASSIST", C_BLUE, "ACTIVE", C_GREEN)
-    draw.text((a2[0] + 12, a2[1] + 36), "73%", fill=C_GREEN, font=f_huge)
-    draw.text((a2[0] + 65, a2[1] + 42), "LEFT", fill=C_GREEN, font=f_bold)
-    draw.text((a2[0] + card_w - 75, a2[1] + 42), "5H ROLLING", fill=C_TEXT_DIM, font=f_small)
-    draw_segmented_bar(draw, a2[0] + 12, a2[1] + 68, card_w - 24, 8, 73, C_GREEN)
-    draw.text((a2[0] + 12, a2[1] + 84), "RESET IN: 4H 16M", fill=C_TEXT_MUTED, font=f_small)
+    for idx, (title, col, bd, bd_col, p_lbl, p_val, p_pct, p_rst, s_lbl, s_val, s_pct, s_rst, foot) in enumerate(ai_focus_data):
+        ax = m + idx * (card_w + gap)
+        draw.rectangle([ax, curr_y, ax + card_w, curr_y + card_h], fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
+        draw.text((ax + 20, curr_y + 20), title, fill=col, font=f_title)
 
-    draw.line([a2[0] + 12, a2[1] + 104, a2[0] + card_w - 12, a2[1] + 104], fill=(24, 32, 48), width=1)
+        draw.rectangle([ax + card_w - 95, curr_y + 16, ax + card_w - 18, curr_y + 38], fill=(22, 29, 43), outline=(37, 50, 73))
+        draw.text((ax + card_w - 85, curr_y + 20), bd, fill=bd_col, font=f_btn)
 
-    draw.text((a2[0] + 12, a2[1] + 116), "76%", fill=C_GREEN, font=f_huge)
-    draw.text((a2[0] + 65, a2[1] + 122), "LEFT", fill=C_GREEN, font=f_bold)
-    draw.text((a2[0] + card_w - 75, a2[1] + 122), "WEEKLY CAP", fill=C_TEXT_DIM, font=f_small)
-    draw_segmented_bar(draw, a2[0] + 12, a2[1] + 148, card_w - 24, 8, 76, C_GREEN)
-    draw.text((a2[0] + 12, a2[1] + 164), "RESET IN: 6D 01H", fill=C_TEXT_MUTED, font=f_small)
-    draw.text((a2[0] + 12, a2[1] + card_h - 22), "GEMINI 3.8 · GOOGLE AI PRO", fill=C_TEXT_DIM, font=f_small)
+        # Primary Gauge
+        draw.text((ax + 20, curr_y + 75), p_lbl, fill=C_TEXT_MUTED, font=f_sec_metric)
+        draw.text((ax + card_w - 180, curr_y + 68), p_val, fill=col, font=f_huge)
+        draw_segmented_bar(draw, ax + 20, curr_y + 120, card_w - 40, 16, p_pct, col, segments=20)
+        draw.text((ax + 20, curr_y + 148), p_rst, fill=C_TEXT_DIM, font=f_meta)
 
-    # 3. CLAUDE
-    a3 = (m + (card_w + gap) * 2, curr_y)
-    draw_card(draw, a3[0], a3[1], card_w, card_h, "CLAUDE PRO", C_CORAL, "STALE", C_AMBER)
-    draw.text((a3[0] + 12, a3[1] + 36), "97%", fill=C_GREEN, font=f_huge)
-    draw.text((a3[0] + 65, a3[1] + 42), "LEFT", fill=C_GREEN, font=f_bold)
-    draw.text((a3[0] + card_w - 75, a3[1] + 42), "5H ROLLING", fill=C_TEXT_DIM, font=f_small)
-    draw_segmented_bar(draw, a3[0] + 12, a3[1] + 68, card_w - 24, 8, 97, C_GREEN)
-    draw.text((a3[0] + 12, a3[1] + 84), "RESET: NOW (CACHED)", fill=C_TEXT_MUTED, font=f_small)
+        draw.line([ax + 20, curr_y + 195, ax + card_w - 20, curr_y + 195], fill=(24, 32, 48), width=1)
 
-    draw.line([a3[0] + 12, a3[1] + 104, a3[0] + card_w - 12, a3[1] + 104], fill=(24, 32, 48), width=1)
+        # Secondary Gauge
+        draw.text((ax + 20, curr_y + 225), s_lbl, fill=C_TEXT_MUTED, font=f_sec_metric)
+        draw.text((ax + card_w - 160, curr_y + 218), s_val, fill=C_GREEN if s_pct >= 30 else C_AMBER, font=f_huge)
+        draw_segmented_bar(draw, ax + 20, curr_y + 270, card_w - 40, 14, s_pct, C_GREEN if s_pct >= 30 else C_AMBER, segments=20)
+        draw.text((ax + 20, curr_y + 298), s_rst, fill=C_TEXT_DIM, font=f_meta)
 
-    draw.text((a3[0] + 12, a3[1] + 116), "62%", fill=C_GREEN, font=f_huge)
-    draw.text((a3[0] + 65, a3[1] + 122), "LEFT", fill=C_GREEN, font=f_bold)
-    draw.text((a3[0] + card_w - 75, a3[1] + 122), "WEEKLY CAP", fill=C_TEXT_DIM, font=f_small)
-    draw_segmented_bar(draw, a3[0] + 12, a3[1] + 148, card_w - 24, 8, 62, C_GREEN)
-    draw.text((a3[0] + 12, a3[1] + 164), "RESET: NOW (CACHED)", fill=C_TEXT_MUTED, font=f_small)
-    draw.text((a3[0] + 12, a3[1] + card_h - 22), "no***@gmail.com · ANTHROPIC", fill=C_TEXT_DIM, font=f_small)
+        draw.line([ax + 20, curr_y + 345, ax + card_w - 20, curr_y + 345], fill=(24, 32, 48), width=1)
 
-    curr_y += card_h + gap + 10
+        # Telemetry & Diagnostics
+        draw.text((ax + 20, curr_y + 375), "DIAGNOSTIC TELEMETRY:", fill=C_TEXT_DIM, font=f_meta)
+        draw.text((ax + 20, curr_y + 400), "• Poller: High-Frequency Local Daemon", fill=C_TEXT_MUTED, font=f_meta)
+        draw.text((ax + 20, curr_y + 424), "• State: Authenticated Session Cached", fill=C_TEXT_MUTED, font=f_meta)
+        draw.text((ax + 20, curr_y + 448), "• MiniToo Page: Linked to Physical Display", fill=C_ACTIVE_CYAN, font=f_meta)
 
-    # AI Activity Monitor Box below
-    act_w = w - m * 2
-    act_h = 135
+        draw.text((ax + 20, curr_y + card_h - 26), foot, fill=C_TEXT_MUTED, font=f_meta)
+
+    curr_y += card_h + gap
+
+    # Agent Activity Box below
+    act_w = w - 2 * m
+    act_h = 320
     draw.rectangle([m, curr_y, m + act_w, curr_y + act_h], fill=C_CARD_BG, outline=C_PURPLE, width=2)
-    draw.text((m + 16, curr_y + 12), "LOCAL AGENT ACTIVITY DAEMON (PROCESS MONITOR + CLI WAL)", fill=C_PURPLE, font=f_bold)
-    draw.line([m + 12, curr_y + 36, m + act_w - 12, curr_y + 36], fill=(28, 38, 56), width=1)
+    draw.text((m + 20, curr_y + 20), "LOCAL AGENT ACTIVITY DAEMON (ACTIVE REPOSITORIES & PROCESS MONITOR)", fill=C_PURPLE, font=f_title)
+    draw.line([m + 20, curr_y + 55, m + act_w - 20, curr_y + 55], fill=(28, 38, 56), width=1)
 
-    draw.ellipse([m + 18, curr_y + 54, m + 26, curr_y + 62], fill=C_GREEN)
-    draw.text((m + 34, curr_y + 51), "CODEX CLI:", fill=C_TEXT_WHITE, font=f_bold)
-    draw.text((m + 120, curr_y + 52), "WORKING  (Active 6h 52m · 24 tasks completed today · Subprocess PID 1492)", fill=C_GREEN, font=f_small)
+    agents = [
+        ("CODEX CLI DAEMON", "WORKING", C_GREEN, "Active 6h 52m · 24 tasks completed today · Subprocess PID 1492 (Silent execution)", "Repository: claude-minitoo · Branch: main"),
+        ("ANTHROPIC CLAUDE PRO", "IDLE", C_TEXT_DIM, "Last prompt evaluated 42m ago · Web session active · No pending queued turns", "Diagnostics: no***@gmail.com (PRO)"),
+        ("GEMINI CODE ENGINE", "WORKING", C_GREEN, "Active 5h 45m · Background indexing sparkline tensors & repo embeddings", "Target: Desktop Command Center UI"),
+    ]
 
-    draw.ellipse([m + 18, curr_y + 80, m + 26, curr_y + 88], fill=C_TEXT_DIM)
-    draw.text((m + 34, curr_y + 77), "CLAUDE PRO:", fill=C_TEXT_WHITE, font=f_bold)
-    draw.text((m + 120, curr_y + 78), "IDLE     (Last prompt 42m ago · Web session active)", fill=C_TEXT_MUTED, font=f_small)
-
-    draw.ellipse([m + 18, curr_y + 106, m + 26, curr_y + 114], fill=C_GREEN)
-    draw.text((m + 34, curr_y + 103), "GEMINI CODE:", fill=C_TEXT_WHITE, font=f_bold)
-    draw.text((m + 120, curr_y + 104), "WORKING  (Active 5h 45m · Background indexing sparkline tensors)", fill=C_GREEN, font=f_small)
+    for idx, (aname, astat, acol, adetail, arepo) in enumerate(agents):
+        ay = curr_y + 75 + idx * 75
+        draw.ellipse([m + 25, ay + 12, m + 37, ay + 24], fill=acol)
+        draw.text((m + 50, ay + 8), aname, fill=C_TEXT_WHITE, font=f_sec_metric)
+        draw.text((m + 320, ay + 8), astat, fill=acol, font=f_btn)
+        draw.text((m + 420, ay + 10), adetail, fill=C_TEXT_MUTED, font=f_meta)
+        draw.text((m + act_w - 380, ay + 10), arepo, fill=C_ACTIVE_CYAN, font=f_meta)
+        draw.line([m + 25, ay + 48, m + act_w - 25, ay + 48], fill=(20, 28, 42), width=1)
 
     img.save(out_path, "PNG")
-    print(f"Generated: {out_path}")
+    print(f"Generated 1080p: {out_path}")
 
-# ---------------------------------------------------------------------------
-# 5. PRESET SYSTEM SCREENSHOT (RTX GPU, DGX Spark, Services, Coding)
-# ---------------------------------------------------------------------------
 def render_preset_system_screenshot(out_path: str):
-    """Renders SYSTEM hero preset with Local RTX, DGX Spark, Services, Coding."""
-    w, h = 680, 520
+    """Renders 1080p SYSTEM hero preset."""
+    w, h = 1920, 1080
     img = Image.new("RGBA", (w, h), C_BG)
     draw = ImageDraw.Draw(img)
-    draw_header(draw, w, active_preset="SYSTEM")
+    draw_command_center_header(draw, w, active_preset="SYSTEM")
 
-    f_sec = get_font(10, bold=True)
-    f_bold = get_font(11, bold=True)
-    f_huge = get_font(16, bold=True)
-    f_small = get_font(9, bold=False)
+    f_title = get_font(15, bold=True)
+    f_btn = get_font(11, bold=True)
+    f_huge = get_font(28, bold=True)
+    f_sec_metric = get_font(15, bold=True)
+    f_meta = get_font(11, bold=False)
 
-    curr_y = 74
-    m = 12
-    draw.text((m, curr_y), "─── [ FOCUS: HARDWARE CLUSTER & WORKSTATION TELEMETRY ] ", fill=C_BLUE, font=f_sec)
-    draw.line([m + 350, curr_y + 8, w - m, curr_y + 8], fill=(24, 32, 48), width=1)
-    curr_y += 24
+    m = 20
+    curr_y = 86
 
-    card_w = (w - m * 2 - 8) // 2
-    card_h = 185
-    gap = 8
+    draw.rectangle([m, curr_y, w - m, curr_y + 48], fill=(14, 22, 36), outline=C_ACTIVE_CYAN, width=1)
+    draw.rectangle([m + 8, curr_y + 8, m + 175, curr_y + 40], fill=(21, 38, 59), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((m + 22, curr_y + 14), "◀ BACK TO ALL (Esc)", fill=C_ACTIVE_CYAN, font=f_btn)
+    draw.text((m + 195, curr_y + 14), "FOCUS PRESENTATION MODE: WORKSTATION HARDWARE, DGX SPARK, AND CLUSTER DAEMONS", fill=C_GREEN, font=f_title)
+    draw.text((w - m - 20, curr_y + 16), "REALTIME HARDWARE TELEMETRY · 1080p COMMAND CENTER", fill=C_TEXT_DIM, font=f_meta, anchor="ra")
 
-    # 1. LOCAL PC (RTX 5080)
-    s1 = (m, curr_y)
-    draw_card(draw, s1[0], s1[1], card_w, card_h, "LOCAL WORKSTATION", (55, 195, 245), "ONLINE", C_GREEN)
-    draw.text((s1[0] + 12, s1[1] + 36), "RTX 5080 16GB", fill=C_TEXT_WHITE, font=f_huge)
-    draw.text((s1[0] + card_w - 70, s1[1] + 40), "GPU 3%", fill=C_GREEN, font=f_bold)
-    draw_segmented_bar(draw, s1[0] + 12, s1[1] + 65, card_w - 24, 8, 3, C_GREEN)
-    draw.text((s1[0] + 12, s1[1] + 82), "TEMP: 38°C  ·  POWER: 42W  ·  VRAM: 3.0 / 16.0 GB (18%)", fill=C_TEXT_MUTED, font=f_small)
+    curr_y += 62
+    gap = 16
+    card_w = (w - 2 * m - gap) // 2
+    card_h = 420
 
-    draw.line([s1[0] + 12, s1[1] + 104, s1[0] + card_w - 12, s1[1] + 104], fill=(24, 32, 48), width=1)
+    # 1. Local PC
+    draw.rectangle([m, curr_y, m + card_w, curr_y + card_h], fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
+    draw.text((m + 20, curr_y + 20), "LOCAL WORKSTATION HARDWARE (RTX 5080)", fill=(55, 195, 245), font=f_title)
+    draw.text((m + 20, curr_y + 70), "GPU LOAD (RTX 5080)", fill=C_TEXT_MUTED, font=f_sec_metric)
+    draw.text((m + card_w - 120, curr_y + 65), "3%", fill=C_GREEN, font=f_huge)
+    draw_segmented_bar(draw, m + 20, curr_y + 115, card_w - 40, 16, 3, C_GREEN, segments=20)
+    draw.text((m + 20, curr_y + 145), "TEMP: 38°C   VRAM USAGE: 3.0 GB / 16.0 GB   FAN: 32%", fill=C_TEXT_DIM, font=f_meta)
 
-    draw.text((s1[0] + 12, s1[1] + 116), "SYSTEM RAM: 44%", fill=C_TEXT_WHITE, font=f_bold)
-    draw.text((s1[0] + card_w - 110, s1[1] + 116), "28.1 / 64.0 GB", fill=C_TEXT_DIM, font=f_small)
-    draw_segmented_bar(draw, s1[0] + 12, s1[1] + 138, card_w - 24, 8, 44, (55, 195, 245))
-    draw.text((s1[0] + 12, s1[1] + card_h - 20), "AMD RYZEN 9 9950X · 16 CORES / 32 THREADS · WINDOWS 11", fill=C_TEXT_DIM, font=f_small)
+    draw.line([m + 20, curr_y + 190, m + card_w - 20, curr_y + 190], fill=(24, 32, 48), width=1)
 
-    # 2. DGX SPARK
-    s2 = (m + card_w + gap, curr_y)
-    draw_card(draw, s2[0], s2[1], card_w, card_h, "REMOTE DGX SPARK", C_NVIDIA, "ONLINE", C_GREEN)
-    draw.text((s2[0] + 12, s2[1] + 36), "NVIDIA GB10 SPARK", fill=C_NVIDIA, font=f_huge)
-    draw.text((s2[0] + card_w - 70, s2[1] + 40), "GPU 0%", fill=C_GREEN, font=f_bold)
-    draw_segmented_bar(draw, s2[0] + 12, s2[1] + 65, card_w - 24, 8, 0, C_GREEN)
-    draw.text((s2[0] + 12, s2[1] + 82), "TEMP: 39°C  ·  SYS LOAD: 1.72  ·  VRAM: 1.2 / 128.0 GB", fill=C_TEXT_MUTED, font=f_small)
+    draw.text((m + 20, curr_y + 215), "SYSTEM RAM (DDR5)", fill=C_TEXT_MUTED, font=f_sec_metric)
+    draw.text((m + card_w - 140, curr_y + 210), "44%", fill=C_BLUE, font=f_huge)
+    draw_segmented_bar(draw, m + 20, curr_y + 260, card_w - 40, 14, 44, C_BLUE, segments=20)
+    draw.text((m + 20, curr_y + 290), "USED: 28.1 GB / 64.0 GB   COMMITTED: 34.2 GB", fill=C_TEXT_DIM, font=f_meta)
 
-    draw.line([s2[0] + 12, s2[1] + 104, s2[0] + card_w - 12, s2[1] + 104], fill=(24, 32, 48), width=1)
+    draw.text((m + 20, curr_y + card_h - 26), "WINDOWS 11 PRO WORKSTATION · AMD RYZEN 9 7950X", fill=C_TEXT_DIM, font=f_meta)
 
-    draw.text((s2[0] + 12, s2[1] + 116), "CLUSTER RAM: 40%", fill=C_TEXT_WHITE, font=f_bold)
-    draw.text((s2[0] + card_w - 110, s2[1] + 116), "51.2 / 128.0 GB", fill=C_TEXT_DIM, font=f_small)
-    draw_segmented_bar(draw, s2[0] + 12, s2[1] + 138, card_w - 24, 8, 40, C_NVIDIA)
-    draw.text((s2[0] + 12, s2[1] + card_h - 20), "TAILSCALE MESH 100.x.x.x · ZERO CONSOLE FLASHING", fill=C_TEXT_DIM, font=f_small)
+    # 2. DGX Spark Cluster
+    dx = m + card_w + gap
+    draw.rectangle([dx, curr_y, dx + card_w, curr_y + card_h], fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
+    draw.text((dx + 20, curr_y + 20), "NVIDIA DGX SPARK · REMOTE ACCELERATOR", fill=C_NVIDIA, font=f_title)
+    draw.text((dx + 20, curr_y + 70), "CLUSTER GPU LOAD", fill=C_TEXT_MUTED, font=f_sec_metric)
+    draw.text((dx + card_w - 120, curr_y + 65), "0%", fill=C_GREEN, font=f_huge)
+    draw_segmented_bar(draw, dx + 20, curr_y + 115, card_w - 40, 16, 0, C_GREEN, segments=20)
+    draw.text((dx + 20, curr_y + 145), "TEMP: 39°C   LOAD AVERAGE: 1.72, 1.48, 1.55", fill=C_TEXT_DIM, font=f_meta)
 
-    curr_y += card_h + gap + 10
+    draw.line([dx + 20, curr_y + 190, dx + card_w - 20, curr_y + 190], fill=(24, 32, 48), width=1)
 
-    # Bottom Row: Services & Coding Activity
-    card_h2 = 185
+    draw.text((dx + 20, curr_y + 215), "CLUSTER RAM (UNIFIED)", fill=C_TEXT_MUTED, font=f_sec_metric)
+    draw.text((dx + card_w - 140, curr_y + 210), "40%", fill=C_NVIDIA, font=f_huge)
+    draw_segmented_bar(draw, dx + 20, curr_y + 260, card_w - 40, 14, 40, C_NVIDIA, segments=20)
+    draw.text((dx + 20, curr_y + 290), "USED: 51.2 GB / 128.0 GB   NVLINK HEALTH: OK", fill=C_TEXT_DIM, font=f_meta)
 
-    # 3. SERVICES
-    s3 = (m, curr_y)
-    draw_card(draw, s3[0], s3[1], card_w, card_h2, "INTERNAL SERVICES", C_GREEN, "5/5 UP", C_GREEN)
-    svcs = [
-        ("TAILSCALE MESH NODE", "ONLINE (100.82.14.9)", True),
-        ("OLLAMA LLM RUNTIME", "ONLINE (PORT 11434)", True),
-        ("COMFYUI TENSOR SERVER", "ONLINE (PORT 8188)", True),
-        ("FORGE3D SPATIAL ENGINE", "ONLINE (PORT 9000)", True),
-        ("HERMES AGENT BRIDGE", "ONLINE (PORT 5005)", True),
+    draw.text((dx + 20, curr_y + card_h - 26), "ssh://dgx-spark · NVIDIA BLACKWELL GB10 CLUSTER", fill=C_TEXT_DIM, font=f_meta)
+
+    curr_y += card_h + gap
+
+    # Services Box below
+    srv_w = w - 2 * m
+    srv_h = 420
+    draw.rectangle([m, curr_y, m + srv_w, curr_y + srv_h], fill=C_CARD_BG, outline=C_GREEN, width=1)
+    draw.text((m + 20, curr_y + 20), "CORE SYSTEM DAEMONS & TAILSCALE WORKSTATION HEALTH", fill=C_GREEN, font=f_title)
+    draw.line([m + 20, curr_y + 55, m + srv_w - 20, curr_y + 55], fill=(28, 38, 56), width=1)
+
+    services_list = [
+        ("DGX CLUSTER SSH DAEMON", "ONLINE", C_GREEN, "ssh://dgx-spark:22 · Keepalive Ping 24ms · Non-blocking healthcheck"),
+        ("OLLAMA LLM RUNTIME", "ONLINE", C_GREEN, "http://localhost:11434 · Local deepseek-r1:8b loaded in GPU VRAM"),
+        ("COMFYUI GENERATION SERVER", "ONLINE", C_GREEN, "http://127.0.0.1:8188 · SDXL Turbo Workflow Ready"),
+        ("FORGE3D PIXEL SHADER SERVICE", "ONLINE", C_GREEN, "http://localhost:7860 · Nearest-Neighbor 160x128 Streamer"),
+        ("TAILSCALE WORKSTATION MESH", "HEALTHY", C_GREEN, "100.x.y.z · 10 nodes interconnected securely (Tailscale Mesh)"),
     ]
-    sy = s3[1] + 36
-    for s_name, s_detail, s_up in svcs:
-        draw.ellipse([s3[0] + 14, sy + 4, s3[0] + 20, sy + 10], fill=C_GREEN if s_up else C_RED)
-        draw.text((s3[0] + 28, sy + 1), s_name, fill=C_TEXT_WHITE, font=f_bold)
-        draw.text((s3[0] + card_w - 150, sy + 2), s_detail, fill=C_GREEN, font=f_small)
-        sy += 25
-    draw.text((s3[0] + 12, s3[1] + card_h2 - 20), "TCP HEALTH PROBE · AUTOMATIC BACKGROUND RECOVERY", fill=C_TEXT_DIM, font=f_small)
 
-    # 4. CODING & AI ACTIVITY
-    s4 = (m + card_w + gap, curr_y)
-    draw_card(draw, s4[0], s4[1], card_w, card_h2, "ACTIVE CODING REPOS", C_PURPLE, "LIVE", C_GREEN)
-    repos = [
-        ("claude-minitoo", "Milestone 13 UX & BT Coexistence", "ACTIVE"),
-        ("ai-dev-skills", "Autonomous coding skills", "IDLE"),
-        ("quant-codex", "Crypto trading engine", "IDLE"),
-        ("flow88-mix-engine", "Spatial DSP pipeline", "IDLE"),
-    ]
-    ry = s4[1] + 36
-    for r_name, r_desc, r_st in repos:
-        draw.ellipse([s4[0] + 14, ry + 4, s4[0] + 20, ry + 10], fill=C_GREEN if r_st == "ACTIVE" else C_TEXT_DIM)
-        draw.text((s4[0] + 28, ry + 1), r_name, fill=C_ACTIVE_CYAN if r_st == "ACTIVE" else C_TEXT_WHITE, font=f_bold)
-        draw.text((s4[0] + 140, ry + 2), r_desc, fill=C_TEXT_MUTED, font=f_small)
-        ry += 25
-    draw.text((s4[0] + 12, s4[1] + card_h2 - 20), "WORKSPACE GIT PROBE · REALTIME DEV ACTIVITY", fill=C_TEXT_DIM, font=f_small)
+    for idx, (sname, sstat, scol, sdesc) in enumerate(services_list):
+        sy = curr_y + 75 + idx * 65
+        draw.ellipse([m + 25, sy + 10, m + 37, sy + 22], fill=scol)
+        draw.text((m + 50, sy + 6), sname, fill=C_TEXT_WHITE, font=f_sec_metric)
+        draw.text((m + 420, sy + 8), sdesc, fill=C_TEXT_MUTED, font=f_meta)
+        draw.text((m + srv_w - 120, sy + 6), sstat, fill=scol, font=f_btn)
+        draw.line([m + 25, sy + 44, m + srv_w - 25, sy + 44], fill=(20, 28, 42), width=1)
 
     img.save(out_path, "PNG")
-    print(f"Generated: {out_path}")
+    print(f"Generated 1080p: {out_path}")
 
 # ---------------------------------------------------------------------------
-# 6. SETTINGS DASHBOARD TAB SCREENSHOT
+# 3. 9:16 VERTICAL CREATOR CAPTURE SCREENSHOTS (Shorts / OBS Filming)
+# ---------------------------------------------------------------------------
+def render_creator_crypto_vertical_screenshot(out_path: str):
+    """Renders 1080x1920 9:16 vertical Shorts capture view for Crypto (BTC, ETH, SOL, DOGE, PEPE)."""
+    w, h = 1080, 1920
+    img = Image.new("RGBA", (w, h), C_BG)
+    draw = ImageDraw.Draw(img)
+
+    f_huge_price = get_font(38, bold=True)
+    f_sec_metric = get_font(20, bold=True)
+    f_title = get_font(18, bold=True)
+    f_meta = get_font(13, bold=False)
+
+    # Clean Creator Top Bar
+    draw.rectangle([0, 0, w, 84], fill=C_HEADER_BG, outline=(24, 32, 48), width=1)
+    draw.rectangle([24, 18, 240, 64], fill=(43, 20, 20), outline=C_RED, width=1)
+    draw.text((45, 30), "✕ EXIT CREATOR (Esc)", fill=C_RED, font=get_font(14, bold=True))
+
+    draw.text((270, 32), "CAPTURE RATIO:", fill=C_TEXT_DIM, font=f_meta)
+    draw.rectangle([385, 20, 480, 62], fill=(16, 22, 34), outline=(28, 37, 54))
+    draw.text((410, 32), "16:9", fill=C_TEXT_MUTED, font=get_font(13, bold=True))
+
+    draw.rectangle([495, 20, 645, 62], fill=(11, 56, 74), outline=C_ACTIVE_CYAN, width=2)
+    draw.text((515, 32), "9:16 SHORTS", fill=C_ACTIVE_CYAN, font=get_font(13, bold=True))
+
+    draw.text((w - 280, 32), "PRESET: [ CRYPTO ]", fill=C_GOLD, font=get_font(15, bold=True))
+
+    draw.line([0, 84, w, 84], fill=(28, 37, 54), width=1)
+
+    # 5 Vertically Stacked Hero Cards
+    curr_y = 110
+    card_w = w - 60
+    card_h = 330
+    gap = 24
+    m = 30
+
+    coins_data = [
+        ("₿ BITCOIN (BTC)", "$84,021.50", "-0.9%", C_GOLD, C_RED, [0.2, 0.28, 0.24, 0.42, 0.38, 0.52, 0.48, 0.65, 0.58, 0.72, 0.68, 0.85, 0.78, 0.92, 0.88, 0.95], True, "$85,208", "$83,230"),
+        ("Ξ ETHEREUM (ETH)", "$2,691.40", "-0.2%", C_ETH, C_RED, [0.8, 0.72, 0.75, 0.62, 0.65, 0.55, 0.58, 0.48, 0.52, 0.42, 0.45, 0.35, 0.38, 0.28, 0.30, 0.22], False, "$2,740", "$2,667"),
+        ("◎ SOLANA (SOL)", "$122.06", "+3.3%", C_SOLANA, C_GREEN, [0.3, 0.35, 0.32, 0.45, 0.48, 0.58, 0.55, 0.68, 0.72, 0.82, 0.78, 0.88, 0.85, 0.94, 0.91, 0.97], False, "$122.75", "$115.92"),
+        ("Ð DOGECOIN (DOGE)", "$0.09892", "+2.7%", C_DOGE, C_GREEN, [0.4, 0.42, 0.38, 0.50, 0.52, 0.60, 0.58, 0.68, 0.65, 0.75, 0.72, 0.82, 0.80, 0.88, 0.85, 0.91], False, "$0.09971", "$0.09460"),
+        ("🐸 PEPE (PEPE)", "$0.00000452", "+0.7%", C_PEPE, C_GREEN, [0.5, 0.48, 0.52, 0.55, 0.53, 0.62, 0.60, 0.68, 0.65, 0.72, 0.70, 0.76, 0.74, 0.79, 0.77, 0.82], False, "$0.00000468", "$0.00000438"),
+    ]
+
+    for idx, (title, price, chg, col, chg_col, pts, is_act, hi, lo) in enumerate(coins_data):
+        draw.rectangle([m, curr_y, m + card_w, curr_y + card_h], fill=C_CARD_BG, outline=C_ACTIVE_CYAN if is_act else C_CARD_BORDER, width=2 if is_act else 1)
+        draw.text((m + 24, curr_y + 20), title, fill=col, font=f_title)
+
+        if is_act:
+            draw.rectangle([m + card_w - 130, curr_y + 16, m + card_w - 20, curr_y + 44], fill=C_ACTIVE_TAG_BG, outline=C_ACTIVE_CYAN)
+            draw.text((m + card_w - 118, curr_y + 22), "ON MINITOO", fill=C_ACTIVE_CYAN, font=get_font(12, bold=True))
+        else:
+            draw.rectangle([m + card_w - 110, curr_y + 16, m + card_w - 20, curr_y + 44], fill=(22, 29, 43), outline=(37, 50, 73))
+            draw.text((m + card_w - 95, curr_y + 22), "SPOT 24H", fill=C_TEXT_MUTED, font=get_font(12, bold=True))
+
+        draw.text((m + 24, curr_y + 60), price, fill=col, font=f_huge_price)
+        draw.text((m + card_w - 120, curr_y + 72), chg, fill=chg_col, font=f_sec_metric)
+
+        # High-res Sparkline
+        sp_x1 = m + 24
+        sp_x2 = m + card_w - 24
+        sp_y1 = curr_y + 125
+        sp_y2 = curr_y + card_h - 55
+        step = (sp_x2 - sp_x1) / (len(pts) - 1)
+        sp_pts = [(sp_x1 + i * step, sp_y2 - v * (sp_y2 - sp_y1)) for i, v in enumerate(pts)]
+        for i in range(len(sp_pts) - 1):
+            draw.line([sp_pts[i], sp_pts[i+1]], fill=col, width=3)
+        draw.ellipse([sp_pts[-1][0] - 5, sp_pts[-1][1] - 5, sp_pts[-1][0] + 5, sp_pts[-1][1] + 5], fill=col)
+
+        draw.text((m + 24, curr_y + card_h - 30), f"24H HIGH: {hi}   LOW: {lo}", fill=C_TEXT_DIM, font=f_meta)
+        draw.text((m + card_w - 24, curr_y + card_h - 30), "COINGECKO SPOT FEED", fill=C_TEXT_DIM, font=f_meta, anchor="ra")
+
+        curr_y += card_h + gap
+
+    img.save(out_path, "PNG")
+    print(f"Generated 9:16 Shorts: {out_path}")
+
+def render_creator_ai_vertical_screenshot(out_path: str):
+    """Renders 1080x1920 9:16 vertical Shorts capture view for AI (Codex, Gemini, Claude, Agent Activity)."""
+    w, h = 1080, 1920
+    img = Image.new("RGBA", (w, h), C_BG)
+    draw = ImageDraw.Draw(img)
+
+    f_huge = get_font(34, bold=True)
+    f_sec_metric = get_font(20, bold=True)
+    f_title = get_font(18, bold=True)
+    f_meta = get_font(13, bold=False)
+
+    # Top Bar
+    draw.rectangle([0, 0, w, 84], fill=C_HEADER_BG, outline=(24, 32, 48), width=1)
+    draw.rectangle([24, 18, 240, 64], fill=(43, 20, 20), outline=C_RED, width=1)
+    draw.text((45, 30), "✕ EXIT CREATOR (Esc)", fill=C_RED, font=get_font(14, bold=True))
+
+    draw.text((270, 32), "CAPTURE RATIO:", fill=C_TEXT_DIM, font=f_meta)
+    draw.rectangle([385, 20, 480, 62], fill=(16, 22, 34), outline=(28, 37, 54))
+    draw.text((410, 32), "16:9", fill=C_TEXT_MUTED, font=get_font(13, bold=True))
+
+    draw.rectangle([495, 20, 645, 62], fill=(11, 56, 74), outline=C_ACTIVE_CYAN, width=2)
+    draw.text((515, 32), "9:16 SHORTS", fill=C_ACTIVE_CYAN, font=get_font(13, bold=True))
+
+    draw.text((w - 230, 32), "PRESET: [ AI ]", fill=C_CORAL, font=get_font(15, bold=True))
+
+    draw.line([0, 84, w, 84], fill=(28, 37, 54), width=1)
+
+    curr_y = 110
+    card_w = w - 60
+    card_h = 390
+    gap = 26
+    m = 30
+
+    ai_data = [
+        ("CODEX CLI (OPENAI)", C_GREEN, "READY", C_GREEN, "5H ROLLING LIMIT", "100% LEFT", 100, "RESET: 5H 00M", "WEEKLY CAP", "29% LEFT", 29, "RESET: 1D 22H", "GPT-5.6 · CHATGPT PLUS SUBSCRIPTION"),
+        ("GEMINI CODE ASSIST (GOOGLE)", C_BLUE, "ACTIVE", C_GREEN, "5H ROLLING LIMIT", "73% LEFT", 73, "RESET: 4H 16M", "WEEKLY CAP", "76% LEFT", 76, "RESET: 6D 01H", "GEMINI 3.8 · GOOGLE AI PRO WORKSPACE"),
+        ("CLAUDE PRO (ANTHROPIC)", C_CORAL, "ONLINE", C_GREEN, "5H ROLLING LIMIT", "97% LEFT", 97, "RESET: NOW (CACHED)", "WEEKLY CAP", "62% LEFT", 62, "RESET: NOW (CACHED)", "no***@gmail.com · ANTHROPIC PRO"),
+    ]
+
+    for idx, (title, col, bd, bd_col, p_lbl, p_val, p_pct, p_rst, s_lbl, s_val, s_pct, s_rst, foot) in enumerate(ai_data):
+        draw.rectangle([m, curr_y, m + card_w, curr_y + card_h], fill=C_CARD_BG, outline=C_CARD_BORDER, width=1)
+        draw.text((m + 24, curr_y + 20), title, fill=col, font=f_title)
+
+        draw.rectangle([m + card_w - 110, curr_y + 16, m + card_w - 20, curr_y + 44], fill=(22, 29, 43), outline=(37, 50, 73))
+        draw.text((m + card_w - 95, curr_y + 22), bd, fill=bd_col, font=get_font(12, bold=True))
+
+        # Primary Gauge
+        draw.text((m + 24, curr_y + 65), p_lbl, fill=C_TEXT_MUTED, font=f_meta)
+        draw.text((m + card_w - 180, curr_y + 55), p_val, fill=col, font=f_huge)
+        draw_segmented_bar(draw, m + 24, curr_y + 105, card_w - 48, 14, p_pct, col, segments=20)
+        draw.text((m + 24, curr_y + 128), p_rst, fill=C_TEXT_DIM, font=f_meta)
+
+        draw.line([m + 24, curr_y + 165, m + card_w - 24, curr_y + 165], fill=(24, 32, 48), width=1)
+
+        # Secondary Gauge
+        draw.text((m + 24, curr_y + 190), s_lbl, fill=C_TEXT_MUTED, font=f_meta)
+        draw.text((m + card_w - 170, curr_y + 180), s_val, fill=C_GREEN if s_pct >= 30 else C_AMBER, font=f_huge)
+        draw_segmented_bar(draw, m + 24, curr_y + 230, card_w - 48, 12, s_pct, C_GREEN if s_pct >= 30 else C_AMBER, segments=20)
+        draw.text((m + 24, curr_y + 252), s_rst, fill=C_TEXT_DIM, font=f_meta)
+
+        draw.text((m + 24, curr_y + card_h - 30), foot, fill=C_TEXT_MUTED, font=f_meta)
+
+        curr_y += card_h + gap
+
+    # AI Activity Card
+    act_h = 420
+    draw.rectangle([m, curr_y, m + card_w, curr_y + act_h], fill=C_CARD_BG, outline=C_PURPLE, width=2)
+    draw.text((m + 24, curr_y + 20), "LOCAL AGENT ACTIVITY DAEMON", fill=C_PURPLE, font=f_title)
+    draw.line([m + 24, curr_y + 55, m + card_w - 24, curr_y + 55], fill=(28, 38, 56), width=1)
+
+    agents = [
+        ("CODEX CLI DAEMON", "WORKING", C_GREEN, "Active 6h 52m · Subprocess PID 1492"),
+        ("ANTHROPIC CLAUDE PRO", "IDLE", C_TEXT_DIM, "Web session active · Ready for prompts"),
+        ("GEMINI CODE ENGINE", "WORKING", C_GREEN, "Active 5h 45m · Indexing sparkline tensors"),
+    ]
+    for idx, (aname, astat, acol, adetail) in enumerate(agents):
+        ay = curr_y + 80 + idx * 85
+        draw.ellipse([m + 28, ay + 10, m + 42, ay + 24], fill=acol)
+        draw.text((m + 56, ay + 6), aname, fill=C_TEXT_WHITE, font=f_sec_metric)
+        draw.text((m + card_w - 140, ay + 6), astat, fill=acol, font=get_font(14, bold=True))
+        draw.text((m + 56, ay + 38), adetail, fill=C_TEXT_MUTED, font=f_meta)
+
+    img.save(out_path, "PNG")
+    print(f"Generated 9:16 Shorts: {out_path}")
+
+# ---------------------------------------------------------------------------
+# 4. SETTINGS DIALOG HIGH-DPI SCREENSHOTS (900x660)
 # ---------------------------------------------------------------------------
 def render_settings_dashboard_screenshot(out_path: str):
-    """Renders redesigned 5-tab Settings UI on the DASHBOARD tab."""
-    w, h = 720, 560
-    img = Image.new("RGBA", (w, h), C_BG)
+    """Renders 900x660 High-DPI Settings dialog on DASHBOARD tab with UI Scale system."""
+    w, h = 900, 660
+    img = Image.new("RGBA", (w, h), (13, 17, 26))
     draw = ImageDraw.Draw(img)
 
-    f_title = get_font(12, bold=True)
-    f_tab = get_font(10, bold=True)
-    f_h2 = get_font(11, bold=True)
-    f_sub = get_font(9, bold=False)
-    f_bold = get_font(10, bold=True)
-    f_btn = get_font(9, bold=True)
+    f_title = get_font(13, bold=True)
+    f_tab = get_font(11, bold=True)
+    f_bold = get_font(11, bold=True)
+    f_sub = get_font(10, bold=False)
+    f_btn = get_font(10, bold=True)
 
-    # Window title bar
-    draw.rectangle([0, 0, w, 36], fill=(12, 17, 27), outline=(28, 38, 56))
-    draw.text((16, 10), "⚙ SETTINGS · AI DESK DASHBOARD", fill=C_ACTIVE_CYAN, font=f_title)
-    draw.text((w - 30, 10), "✕", fill=C_TEXT_MUTED, font=f_bold)
+    # Dialog Title Bar
+    draw.rectangle([0, 0, w, 44], fill=(10, 14, 22), outline=(24, 32, 48), width=1)
+    draw.text((16, 12), "AI DESK DASHBOARD — CONFIGURATION & SETTINGS", fill=C_ACTIVE_CYAN, font=f_title)
+    draw.text((w - 32, 12), "✕", fill=C_TEXT_MUTED, font=f_title)
 
     # Left Navigation Sidebar (5 Tabs)
-    sidebar_w = 160
-    draw.rectangle([0, 36, sidebar_w, h], fill=(14, 19, 30), outline=(24, 32, 48))
+    sidebar_w = 200
+    draw.rectangle([0, 44, sidebar_w, h - 55], fill=(15, 20, 32), outline=(24, 34, 52), width=1)
 
     tabs = [
         ("GENERAL", False),
@@ -714,108 +900,114 @@ def render_settings_dashboard_screenshot(out_path: str):
         ("ADVANCED", False),
     ]
 
-    ty = 50
-    for tab_name, is_sel in tabs:
+    ty = 60
+    for t_name, is_sel in tabs:
         if is_sel:
-            draw.rectangle([0, ty, sidebar_w, ty + 36], fill=(18, 38, 54), outline=C_ACTIVE_CYAN, width=1)
-            draw.text((20, ty + 10), f"▶ {tab_name}", fill=C_ACTIVE_CYAN, font=f_tab)
+            draw.rectangle([0, ty, sidebar_w, ty + 42], fill=(19, 45, 62), outline=C_ACTIVE_CYAN, width=1)
+            draw.text((22, ty + 12), f"▶  {t_name}", fill=C_ACTIVE_CYAN, font=f_tab)
         else:
-            draw.text((24, ty + 10), tab_name, fill=C_TEXT_MUTED, font=f_tab)
-        ty += 42
+            draw.rectangle([0, ty, sidebar_w, ty + 42], fill=(15, 20, 32), outline=(20, 26, 40))
+            draw.text((22, ty + 12), f"   {t_name}", fill=C_TEXT_MUTED, font=f_tab)
+        ty += 48
 
-    # Right Content Area: DASHBOARD TAB
-    rx = sidebar_w + 16
-    draw.text((rx, 50), "DASHBOARD SECTIONS & INDEPENDENT CARD VISIBILITY", fill=C_ACTIVE_CYAN, font=f_h2)
-    draw.text((rx, 70), "Configure which cards appear on the Desktop app vs the physical MiniToo display.", fill=C_TEXT_MUTED, font=f_sub)
+    # Right Content Area (DASHBOARD tab)
+    rx = sidebar_w + 24
+    rw = w - sidebar_w - 48
+    cy = 60
 
-    card_list = [
-        ("AI USAGE", "SECTION", True, True, True),
-        ("Codex CLI", "CARD", True, True, False),
-        ("Gemini Code", "CARD", True, True, False),
-        ("Claude Pro", "CARD", True, True, False),
-        ("CRYPTO MARKETS", "SECTION", True, True, True),
-        ("Bitcoin (BTC)", "CARD", True, True, False),
-        ("Ethereum (ETH)", "CARD", True, True, False),
-        ("Solana (SOL)", "CARD", True, True, False),
-        ("Dogecoin (DOGE)", "CARD", True, True, False),
-        ("Pepe (PEPE)", "CARD", True, True, False),
-        ("STOCKS SCANNER", "SECTION", True, True, True),
-        ("Volatile Stocks Today", "CARD", True, False, False),
-        ("SYSTEM & HARDWARE", "SECTION", True, True, True),
-        ("Local PC (RTX GPU)", "CARD", True, True, False),
-        ("DGX Spark (GB10)", "CARD", True, True, False),
-        ("Services Health", "CARD", True, True, False),
-        ("Coding Activity", "CARD", True, False, False),
+    draw.text((rx, cy), "DASHBOARD SECTIONS & INDEPENDENT CARD VISIBILITY", fill=C_ACTIVE_CYAN, font=f_title)
+    draw.text((rx, cy + 24), "Configure which cards appear on your desktop command center vs physical MiniToo display.", fill=C_TEXT_DIM, font=f_sub)
+    draw.line([rx, cy + 46, rx + rw, cy + 46], fill=(26, 36, 54), width=1)
+
+    # UI Scale Setting Box
+    sy = cy + 58
+    draw.rectangle([rx, sy, rx + rw, sy + 74], fill=(18, 24, 38), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((rx + 16, sy + 14), "DESKTOP UI SCALE & HIGH-DPI SYSTEM:", fill=C_ACTIVE_CYAN, font=f_bold)
+    draw.text((rx + 16, sy + 38), "Selected: AUTO (Per-Monitor-V2 DPI Awareness)", fill=C_TEXT_WHITE, font=f_sub)
+
+    # Scale choices
+    scale_x = rx + rw - 340
+    for s_opt, s_act in [("AUTO", True), ("100%", False), ("125%", False), ("150%", False), ("200%", False)]:
+        draw.rectangle([scale_x, sy + 22, scale_x + 58, sy + 52], fill=(11, 56, 74) if s_act else (14, 18, 28), outline=C_ACTIVE_CYAN if s_act else (32, 44, 68))
+        draw.text((scale_x + 12, sy + 30), s_opt, fill=C_ACTIVE_CYAN if s_act else C_TEXT_MUTED, font=f_btn)
+        scale_x += 66
+
+    # Section Grid
+    gy = sy + 90
+    draw.text((rx, gy), "ACTIVE PRESET COMPOSITION:", fill=C_TEXT_WHITE, font=f_bold)
+    gy += 28
+
+    cards_table = [
+        ("CRYPTO MARKETS", "Bitcoin (BTC)", True, True),
+        ("CRYPTO MARKETS", "Ethereum (ETH)", True, True),
+        ("CRYPTO MARKETS", "Solana (SOL)", True, True),
+        ("CRYPTO MARKETS", "Dogecoin (DOGE)", True, False),
+        ("CRYPTO MARKETS", "Pepe (PEPE)", True, False),
+        ("AI SUBSCRIPTIONS", "Codex CLI (% LEFT)", True, True),
+        ("AI SUBSCRIPTIONS", "Gemini Code Assist", True, True),
+        ("AI SUBSCRIPTIONS", "Claude Pro Account", True, True),
+        ("VOLATILE STOCKS", "Top 10 Stocks Scanner", True, False),
+        ("LOCAL SYSTEM", "Workstation PC Hardware", True, True),
+        ("LOCAL SYSTEM", "DGX Spark Cluster", True, True),
     ]
 
-    # Tree container
-    cy = 96
-    ch_w = w - rx - 16
-    draw.rectangle([rx, cy, rx + ch_w, cy + 390], fill=(14, 18, 28), outline=(28, 38, 56))
+    draw.rectangle([rx, gy, rx + rw, gy + 320], fill=(16, 21, 34), outline=(30, 42, 64), width=1)
+    # Header
+    draw.text((rx + 18, gy + 10), "SECTION", fill=C_TEXT_DIM, font=f_sub)
+    draw.text((rx + 180, gy + 10), "CARD / METRIC ITEM", fill=C_TEXT_DIM, font=f_sub)
+    draw.text((rx + rw - 220, gy + 10), "DESKTOP APP", fill=C_TEXT_DIM, font=f_sub)
+    draw.text((rx + rw - 90, gy + 10), "MINITOO", fill=C_TEXT_DIM, font=f_sub)
+    draw.line([rx + 10, gy + 30, rx + rw - 10, gy + 30], fill=(26, 36, 54), width=1)
 
-    # Header in list
-    draw.rectangle([rx, cy, rx + ch_w, cy + 24], fill=(18, 24, 38))
-    draw.text((rx + 12, cy + 5), "CARD / WIDGET NAME", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((rx + ch_w - 240, cy + 5), "DESKTOP", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((rx + ch_w - 140, cy + 5), "MINITOO", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((rx + ch_w - 55, cy + 5), "ORDER", fill=C_TEXT_DIM, font=f_sub)
+    for idx, (sec, item, d_on, m_on) in enumerate(cards_table[:9]):
+        ry = gy + 36 + idx * 30
+        row_bg = (19, 27, 42) if idx % 2 == 0 else (16, 21, 34)
+        draw.rectangle([rx + 10, ry - 4, rx + rw - 10, ry + 24], fill=row_bg)
 
-    ly = cy + 28
-    for name, kind, d_on, m_on, is_sec in card_list[:13]:
-        row_bg = (20, 28, 44) if is_sec else ((16, 22, 34) if (ly // 26) % 2 == 0 else (13, 17, 26))
-        draw.rectangle([rx + 4, ly, rx + ch_w - 4, ly + 24], fill=row_bg)
+        draw.text((rx + 18, ry + 2), sec, fill=C_TEXT_MUTED, font=f_sub)
+        draw.text((rx + 180, ry + 2), item, fill=C_TEXT_WHITE, font=f_sub)
 
-        if is_sec:
-            draw.text((rx + 10, ly + 4), f"▼ {name}", fill=C_GOLD, font=f_bold)
-            draw.text((rx + ch_w - 235, ly + 4), "[x] Enabled", fill=C_GREEN, font=f_sub)
-            draw.text((rx + ch_w - 135, ly + 4), "[x] Enabled", fill=C_GREEN, font=f_sub)
-        else:
-            draw.text((rx + 28, ly + 4), f"• {name}", fill=C_TEXT_WHITE, font=f_sub)
-            draw.text((rx + ch_w - 235, ly + 4), "[x] Visible" if d_on else "[ ] Hidden", fill=C_GREEN if d_on else C_TEXT_DIM, font=f_sub)
-            draw.text((rx + ch_w - 135, ly + 4), "[x] Visible" if m_on else "[ ] Hidden", fill=C_GREEN if m_on else C_TEXT_DIM, font=f_sub)
-            # Arrow buttons
-            draw.rectangle([rx + ch_w - 60, ly + 2, rx + ch_w - 40, ly + 20], fill=(22, 32, 48), outline=(38, 52, 76))
-            draw.text((rx + ch_w - 54, ly + 4), "▲", fill=C_ACTIVE_CYAN, font=f_sub)
-            draw.rectangle([rx + ch_w - 35, ly + 2, rx + ch_w - 15, ly + 20], fill=(22, 32, 48), outline=(38, 52, 76))
-            draw.text((rx + ch_w - 29, ly + 4), "▼", fill=C_ACTIVE_CYAN, font=f_sub)
+        # Desktop checkbox
+        draw.rectangle([rx + rw - 210, ry, rx + rw - 192, ry + 18], fill=(14, 38, 25) if d_on else (20, 26, 40), outline=C_GREEN if d_on else (40, 52, 75))
+        if d_on:
+            draw.text((rx + rw - 206, ry + 1), "✓", fill=C_GREEN, font=f_btn)
 
-        ly += 26
+        # MiniToo checkbox
+        draw.rectangle([rx + rw - 80, ry, rx + rw - 62, ry + 18], fill=(14, 38, 25) if m_on else (20, 26, 40), outline=C_GREEN if m_on else (40, 52, 75))
+        if m_on:
+            draw.text((rx + rw - 76, ry + 1), "✓", fill=C_GREEN, font=f_btn)
 
-    # Bottom action bar
-    draw.rectangle([0, h - 48, w, h], fill=(12, 16, 26), outline=(24, 32, 48))
-    draw.rectangle([w - 210, h - 38, w - 120, h - 10], fill=(22, 28, 42), outline=(38, 50, 72))
-    draw.text((w - 190, h - 28), "CANCEL", fill=C_TEXT_MUTED, font=f_btn)
+    # Dialog Footer Action Bar
+    draw.rectangle([0, h - 55, w, h], fill=(10, 14, 22), outline=(24, 32, 48), width=1)
+    draw.rectangle([w - 240, h - 45, w - 130, h - 12], fill=(22, 28, 42), outline=(38, 50, 72))
+    draw.text((w - 205, h - 34), "CANCEL", fill=C_TEXT_MUTED, font=f_btn)
 
-    draw.rectangle([w - 110, h - 38, w - 16, h - 10], fill=(14, 48, 64), outline=C_ACTIVE_CYAN)
-    draw.text((w - 95, h - 28), "SAVE CHANGES", fill=C_ACTIVE_CYAN, font=f_btn)
+    draw.rectangle([w - 120, h - 45, w - 18, h - 12], fill=(14, 56, 76), outline=C_ACTIVE_CYAN)
+    draw.text((w - 95, h - 34), "SAVE CONFIG", fill=C_ACTIVE_CYAN, font=f_btn)
 
     img.save(out_path, "PNG")
-    print(f"Generated: {out_path}")
+    print(f"Generated High-DPI Settings: {out_path}")
 
-# ---------------------------------------------------------------------------
-# 7. SETTINGS MINITOO TAB SCREENSHOT
-# ---------------------------------------------------------------------------
 def render_settings_minitoo_screenshot(out_path: str):
-    """Renders redesigned Settings UI on the MINITOO tab with diagnostics & Low Interference mode."""
-    w, h = 720, 560
-    img = Image.new("RGBA", (w, h), C_BG)
+    """Renders 900x660 High-DPI Settings dialog on MINITOO tab with Bluetooth Low Interference mode."""
+    w, h = 900, 660
+    img = Image.new("RGBA", (w, h), (13, 17, 26))
     draw = ImageDraw.Draw(img)
 
-    f_title = get_font(12, bold=True)
-    f_tab = get_font(10, bold=True)
-    f_h2 = get_font(11, bold=True)
-    f_sub = get_font(9, bold=False)
-    f_bold = get_font(10, bold=True)
-    f_btn = get_font(9, bold=True)
+    f_title = get_font(13, bold=True)
+    f_tab = get_font(11, bold=True)
+    f_bold = get_font(11, bold=True)
+    f_sub = get_font(10, bold=False)
+    f_btn = get_font(10, bold=True)
 
-    # Window title bar
-    draw.rectangle([0, 0, w, 36], fill=(12, 17, 27), outline=(28, 38, 56))
-    draw.text((16, 10), "⚙ SETTINGS · AI DESK DASHBOARD", fill=C_ACTIVE_CYAN, font=f_title)
-    draw.text((w - 30, 10), "✕", fill=C_TEXT_MUTED, font=f_bold)
+    # Dialog Title Bar
+    draw.rectangle([0, 0, w, 44], fill=(10, 14, 22), outline=(24, 32, 48), width=1)
+    draw.text((16, 12), "AI DESK DASHBOARD — CONFIGURATION & SETTINGS", fill=C_ACTIVE_CYAN, font=f_title)
+    draw.text((w - 32, 12), "✕", fill=C_TEXT_MUTED, font=f_title)
 
-    # Left Navigation Sidebar
-    sidebar_w = 160
-    draw.rectangle([0, 36, sidebar_w, h], fill=(14, 19, 30), outline=(24, 32, 48))
+    # Left Navigation Sidebar (5 Tabs)
+    sidebar_w = 200
+    draw.rectangle([0, 44, sidebar_w, h - 55], fill=(15, 20, 32), outline=(24, 34, 52), width=1)
 
     tabs = [
         ("GENERAL", False),
@@ -825,125 +1017,96 @@ def render_settings_minitoo_screenshot(out_path: str):
         ("ADVANCED", False),
     ]
 
-    ty = 50
-    for tab_name, is_sel in tabs:
+    ty = 60
+    for t_name, is_sel in tabs:
         if is_sel:
-            draw.rectangle([0, ty, sidebar_w, ty + 36], fill=(18, 38, 54), outline=C_ACTIVE_CYAN, width=1)
-            draw.text((20, ty + 10), f"▶ {tab_name}", fill=C_ACTIVE_CYAN, font=f_tab)
+            draw.rectangle([0, ty, sidebar_w, ty + 42], fill=(19, 45, 62), outline=C_ACTIVE_CYAN, width=1)
+            draw.text((22, ty + 12), f"▶  {t_name}", fill=C_ACTIVE_CYAN, font=f_tab)
         else:
-            draw.text((24, ty + 10), tab_name, fill=C_TEXT_MUTED, font=f_tab)
-        ty += 42
+            draw.rectangle([0, ty, sidebar_w, ty + 42], fill=(15, 20, 32), outline=(20, 26, 40))
+            draw.text((22, ty + 12), f"   {t_name}", fill=C_TEXT_MUTED, font=f_tab)
+        ty += 48
 
-    # Right Content Area: MINITOO TAB
-    rx = sidebar_w + 16
-    draw.text((rx, 50), "MINITOO HARDWARE & BLUETOOTH CONFIGURATION", fill=C_ACTIVE_CYAN, font=f_h2)
-    draw.text((rx, 70), "Manage physical Bluetooth SPP transport, display rotation, and knob navigation.", fill=C_TEXT_MUTED, font=f_sub)
+    # Right Content Area (MINITOO tab)
+    rx = sidebar_w + 24
+    rw = w - sidebar_w - 48
+    cy = 60
 
-    # 1. GROUP: DEVICE
-    gy = 96
-    gw = w - rx - 16
-    draw.rectangle([rx, gy, rx + gw, gy + 88], fill=(15, 20, 32), outline=(30, 42, 64))
-    draw.text((rx + 12, gy + 8), "DEVICE STATUS & TRANSPORT MODE", fill=C_TEXT_WHITE, font=f_bold)
-    draw.line([rx + 8, gy + 26, rx + gw - 8, gy + 26], fill=(24, 32, 48), width=1)
+    draw.text((rx, cy), "MINITOO BLUETOOTH COEXISTENCE & HARDWARE CONFIG", fill=C_ACTIVE_CYAN, font=f_title)
+    draw.text((rx, cy + 24), "Configure SPP serial transport, audio coexistence, knob polling, and live telemetry.", fill=C_TEXT_DIM, font=f_sub)
+    draw.line([rx, cy + 46, rx + rw, cy + 46], fill=(26, 36, 54), width=1)
 
-    draw.text((rx + 16, gy + 36), "Connection:", fill=C_TEXT_MUTED, font=f_sub)
-    draw.ellipse([rx + 105, gy + 40, rx + 111, gy + 46], fill=C_GREEN)
-    draw.text((rx + 118, gy + 36), "CONNECTED  (Port: COM13 · Divoom Pixoo-Max / MiniToo)", fill=C_GREEN, font=f_bold)
+    # 1. GROUP: BLUETOOTH COEXISTENCE
+    gy = cy + 58
+    draw.rectangle([rx, gy, rx + rw, gy + 105], fill=(18, 24, 38), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((rx + 16, gy + 12), "BLUETOOTH SERIAL SPP & AUDIO COEXISTENCE", fill=C_ACTIVE_CYAN, font=f_bold)
+    draw.line([rx + 12, gy + 32, rx + rw - 12, gy + 32], fill=(28, 38, 56), width=1)
 
-    draw.text((rx + 16, gy + 62), "Bluetooth Mode:", fill=C_TEXT_MUTED, font=f_sub)
-    # Mode buttons
-    draw.rectangle([rx + 115, gy + 56, rx + 185, gy + 78], fill=(18, 24, 36), outline=(38, 50, 72))
-    draw.text((rx + 125, gy + 62), "NORMAL", fill=C_TEXT_MUTED, font=f_btn)
+    draw.text((rx + 18, gy + 45), "Connection:", fill=C_TEXT_MUTED, font=f_sub)
+    draw.ellipse([rx + 115, gy + 49, rx + 123, gy + 57], fill=C_GREEN)
+    draw.text((rx + 130, gy + 45), "CONNECTED  (Port: COM13 · Divoom Pixoo-Max / MiniToo SPP)", fill=C_GREEN, font=f_bold)
 
-    draw.rectangle([rx + 195, gy + 56, rx + 330, gy + 78], fill=(12, 42, 58), outline=C_ACTIVE_CYAN)
-    draw.text((rx + 205, gy + 62), "● LOW INTERFERENCE", fill=C_ACTIVE_CYAN, font=f_btn)
-    draw.text((rx + 340, gy + 62), "(Optimized for Bluetooth Audio Coexistence)", fill=C_TEXT_DIM, font=f_sub)
+    draw.text((rx + 18, gy + 74), "Radio Mode:", fill=C_TEXT_MUTED, font=f_sub)
+    draw.rectangle([rx + 115, gy + 66, rx + 205, gy + 94], fill=(18, 24, 36), outline=(38, 50, 72))
+    draw.text((rx + 135, gy + 74), "NORMAL", fill=C_TEXT_MUTED, font=f_btn)
 
-    # 2. GROUP: DISPLAY & CONTROLS
-    gy2 = gy + 98
-    draw.rectangle([rx, gy2, rx + gw, gy2 + 82], fill=(15, 20, 32), outline=(30, 42, 64))
-    draw.text((rx + 12, gy2 + 8), "DISPLAY & PHYSICAL CONTROLS", fill=C_TEXT_WHITE, font=f_bold)
-    draw.line([rx + 8, gy2 + 26, rx + gw - 8, gy2 + 26], fill=(24, 32, 48), width=1)
+    draw.rectangle([rx + 215, gy + 66, rx + 400, gy + 94], fill=(12, 52, 70), outline=C_ACTIVE_CYAN, width=2)
+    draw.text((rx + 230, gy + 74), "● LOW INTERFERENCE", fill=C_ACTIVE_CYAN, font=f_btn)
+    draw.text((rx + 415, gy + 74), "(Prevents Bluetooth headphone stuttering)", fill=C_TEXT_DIM, font=f_sub)
 
-    draw.text((rx + 16, gy2 + 36), "Auto Cycle Pages:", fill=C_TEXT_MUTED, font=f_sub)
-    draw.text((rx + 125, gy2 + 36), "[x] Enabled", fill=C_GREEN, font=f_bold)
-    draw.text((rx + 220, gy2 + 36), "Dwell Time:", fill=C_TEXT_MUTED, font=f_sub)
-    draw.text((rx + 290, gy2 + 36), "4 seconds", fill=C_ACTIVE_CYAN, font=f_bold)
-    draw.text((rx + 380, gy2 + 36), "Current Page:", fill=C_TEXT_MUTED, font=f_sub)
-    draw.text((rx + 465, gy2 + 36), "BTC (Page 1/7)", fill=C_GOLD, font=f_bold)
+    # 2. GROUP: DISPLAY & PHYSICAL CONTROLS
+    gy2 = gy + 118
+    draw.rectangle([rx, gy2, rx + rw, gy2 + 88], fill=(18, 24, 38), outline=(30, 42, 64))
+    draw.text((rx + 16, gy2 + 12), "DISPLAY DWELL & PHYSICAL KNOB NAVIGATION", fill=C_TEXT_WHITE, font=f_bold)
+    draw.line([rx + 12, gy2 + 32, rx + rw - 12, gy2 + 32], fill=(28, 38, 56), width=1)
 
-    draw.text((rx + 16, gy2 + 58), "Knob Navigation:", fill=C_TEXT_MUTED, font=f_sub)
-    draw.text((rx + 125, gy2 + 58), "[x] Enabled", fill=C_GREEN, font=f_bold)
-    draw.text((rx + 220, gy2 + 58), "Knob Poll Rate:", fill=C_TEXT_MUTED, font=f_sub)
-    draw.text((rx + 320, gy2 + 58), "AUTO (~2.8 Hz in Low Interference)", fill=C_ACTIVE_CYAN, font=f_bold)
+    draw.text((rx + 18, gy2 + 45), "Auto Cycle:", fill=C_TEXT_MUTED, font=f_sub)
+    draw.text((rx + 115, gy2 + 45), "[✓] Enabled", fill=C_GREEN, font=f_bold)
+    draw.text((rx + 230, gy2 + 45), "Dwell Interval:", fill=C_TEXT_MUTED, font=f_sub)
+    draw.text((rx + 330, gy2 + 45), "4 seconds / page", fill=C_ACTIVE_CYAN, font=f_bold)
 
-    # 3. GROUP: LIVE TELEMETRY & DIAGNOSTICS
-    gy3 = gy2 + 92
-    draw.rectangle([rx, gy3, rx + gw, gy3 + 125], fill=(15, 20, 32), outline=C_ACTIVE_CYAN, width=1)
-    draw.text((rx + 12, gy3 + 8), "LIVE BLUETOOTH TRAFFIC TELEMETRY (ROLLING 60-SEC WINDOW)", fill=C_ACTIVE_CYAN, font=f_bold)
-    draw.line([rx + 8, gy3 + 26, rx + gw - 8, gy3 + 26], fill=(24, 32, 48), width=1)
+    draw.text((rx + 18, gy2 + 68), "Knob Control:", fill=C_TEXT_MUTED, font=f_sub)
+    draw.text((rx + 115, gy2 + 68), "[✓] Enabled", fill=C_GREEN, font=f_bold)
+    draw.text((rx + 230, gy2 + 68), "Knob Poller Rate:", fill=C_TEXT_MUTED, font=f_sub)
+    draw.text((rx + 350, gy2 + 68), "AUTO (2.85 Hz in Low Interference)", fill=C_ACTIVE_CYAN, font=f_bold)
 
-    # Stats Grid (3 Clean Columns)
-    c1_lbl = rx + 16
-    c1_val = rx + 110
-    c2_lbl = rx + 175
-    c2_val = rx + 255
-    c3_lbl = rx + 355
-    c3_val = rx + 435
+    # 3. GROUP: ROLLING TELEMETRY
+    gy3 = gy2 + 102
+    draw.rectangle([rx, gy3, rx + rw, gy3 + 140], fill=(16, 21, 34), outline=C_ACTIVE_CYAN, width=1)
+    draw.text((rx + 16, gy3 + 12), "LIVE BLUETOOTH TRAFFIC TELEMETRY (ROLLING 60-SEC WINDOW)", fill=C_ACTIVE_CYAN, font=f_bold)
+    draw.line([rx + 12, gy3 + 32, rx + rw - 12, gy3 + 32], fill=(28, 38, 56), width=1)
+
+    c1_x = rx + 24
+    c2_x = rx + rw // 3 + 10
+    c3_x = rx + 2 * (rw // 3) + 10
 
     # Row 1
-    draw.text((c1_lbl, gy3 + 36), "SPP Writes/min:", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((c1_val, gy3 + 36), "134", fill=C_TEXT_WHITE, font=f_bold)
-
-    draw.text((c2_lbl, gy3 + 36), "SPP Reads/min:", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((c2_val, gy3 + 36), "136", fill=C_TEXT_WHITE, font=f_bold)
-
-    draw.text((c3_lbl, gy3 + 36), "Frames/min:", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((c3_val, gy3 + 36), "2", fill=C_GREEN, font=f_bold)
+    draw.text((c1_x, gy3 + 45), "SPP Writes/min: 134", fill=C_TEXT_WHITE, font=f_sub)
+    draw.text((c2_x, gy3 + 45), "SPP Reads/min: 136", fill=C_TEXT_WHITE, font=f_sub)
+    draw.text((c3_x, gy3 + 45), "Frames/min: 2 (Low Load)", fill=C_GREEN, font=f_bold)
 
     # Row 2
-    draw.text((c1_lbl, gy3 + 60), "Throughput:", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((c1_val - 20, gy3 + 60), "1.89 KB/min", fill=C_GREEN, font=f_bold)
-
-    draw.text((c2_lbl, gy3 + 60), "Total Sent:", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((c2_val, gy3 + 60), "42.6 KB (14f)", fill=C_TEXT_WHITE, font=f_bold)
-
-    draw.text((c3_lbl, gy3 + 60), "Redundant:", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((c3_val, gy3 + 60), "0 (Diff elided)", fill=C_ACTIVE_CYAN, font=f_bold)
+    draw.text((c1_x, gy3 + 70), "Throughput: 1.89 KB/min", fill=C_GREEN, font=f_bold)
+    draw.text((c2_x, gy3 + 70), "Total Sent: 42.6 KB (14f)", fill=C_TEXT_WHITE, font=f_sub)
+    draw.text((c3_x, gy3 + 70), "Redundant Frames: 0 (Diff elided)", fill=C_ACTIVE_CYAN, font=f_bold)
 
     # Row 3
-    draw.text((c1_lbl, gy3 + 84), "Knob Rate:", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((c1_val - 20, gy3 + 84), "2.85 Hz", fill=C_TEXT_WHITE, font=f_bold)
+    draw.text((c1_x, gy3 + 95), "Knob Rate: 2.85 Hz (Relaxed)", fill=C_TEXT_MUTED, font=f_sub)
+    draw.text((c2_x, gy3 + 95), "Channel Check: 1 / min", fill=C_GREEN, font=f_sub)
+    draw.text((c3_x, gy3 + 95), "Errors / Reconnects: 0 / 0", fill=C_GREEN, font=f_bold)
 
-    draw.text((c2_lbl, gy3 + 84), "Channel Check:", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((c2_val, gy3 + 84), "1 / min", fill=C_GREEN, font=f_bold)
+    draw.text((rx + 18, gy3 + 120), "Diagnostic: 25.1% radio contention reduction on MediaTek RZ616 Bluetooth adapter.", fill=C_TEXT_DIM, font=f_sub)
 
-    draw.text((c3_lbl, gy3 + 84), "Errors/Recon:", fill=C_TEXT_DIM, font=f_sub)
-    draw.text((c3_val, gy3 + 84), "0 / 0", fill=C_GREEN, font=f_bold)
+    # Footer Action Bar
+    draw.rectangle([0, h - 55, w, h], fill=(10, 14, 22), outline=(24, 32, 48), width=1)
+    draw.rectangle([w - 240, h - 45, w - 130, h - 12], fill=(22, 28, 42), outline=(38, 50, 72))
+    draw.text((w - 205, h - 34), "CANCEL", fill=C_TEXT_MUTED, font=f_btn)
 
-    draw.text((rx + 16, gy3 + 106), "Coexistence Diagnostic: 25.1% radio contention reduction on MediaTek RZ616 Bluetooth adapter.", fill=C_TEXT_DIM, font=f_sub)
-
-    # Action Buttons
-    gy4 = gy3 + 135
-    draw.rectangle([rx, gy4, rx + 120, gy4 + 26], fill=(18, 32, 48), outline=C_ACTIVE_CYAN)
-    draw.text((rx + 14, gy4 + 7), "TEST DISPLAY", fill=C_ACTIVE_CYAN, font=f_btn)
-
-    draw.rectangle([rx + 130, gy4, rx + 240, gy4 + 26], fill=(18, 32, 48), outline=(40, 56, 80))
-    draw.text((rx + 150, gy4 + 7), "RECONNECT", fill=C_TEXT_WHITE, font=f_btn)
-
-    draw.rectangle([rx + 250, gy4, rx + 380, gy4 + 26], fill=(18, 32, 48), outline=(40, 56, 80))
-    draw.text((rx + 264, gy4 + 7), "COPY DIAGNOSTICS", fill=C_TEXT_WHITE, font=f_btn)
-
-    # Bottom action bar
-    draw.rectangle([0, h - 48, w, h], fill=(12, 16, 26), outline=(24, 32, 48))
-    draw.rectangle([w - 210, h - 38, w - 120, h - 10], fill=(22, 28, 42), outline=(38, 50, 72))
-    draw.text((w - 190, h - 28), "CANCEL", fill=C_TEXT_MUTED, font=f_btn)
-
-    draw.rectangle([w - 110, h - 38, w - 16, h - 10], fill=(14, 48, 64), outline=C_ACTIVE_CYAN)
-    draw.text((w - 95, h - 28), "SAVE CHANGES", fill=C_ACTIVE_CYAN, font=f_btn)
+    draw.rectangle([w - 120, h - 45, w - 18, h - 12], fill=(14, 56, 76), outline=C_ACTIVE_CYAN)
+    draw.text((w - 95, h - 34), "SAVE CONFIG", fill=C_ACTIVE_CYAN, font=f_btn)
 
     img.save(out_path, "PNG")
-    print(f"Generated: {out_path}")
+    print(f"Generated High-DPI Settings: {out_path}")
 
 # ---------------------------------------------------------------------------
 # MAIN SCRIPT RUNNER
@@ -951,16 +1114,24 @@ def render_settings_minitoo_screenshot(out_path: str):
 if __name__ == "__main__":
     os.makedirs("assets/screenshots", exist_ok=True)
 
-    # Milestone 13 Requested Screenshots
+    # 1. High-DPI 1080p (1920x1080) Dashboard Screenshots
+    render_preset_all_screenshot("assets/screenshots/preset-all.png")
     render_preset_ai_screenshot("assets/screenshots/preset-ai.png")
     render_preset_crypto_screenshot("assets/screenshots/preset-crypto.png")
     render_preset_stocks_screenshot("assets/screenshots/preset-stocks.png")
     render_preset_system_screenshot("assets/screenshots/preset-system.png")
-    render_preset_all_screenshot("assets/screenshots/preset-all.png")
+
+    # 2. Scaled High-DPI Settings Dialog Screenshots (900x660)
     render_settings_dashboard_screenshot("assets/screenshots/settings-dashboard.png")
     render_settings_minitoo_screenshot("assets/screenshots/settings-minitoo.png")
 
-    # Legacy numbered screenshots for backward compatibility
+    # 3. 9:16 Vertical Creator Capture Screenshots (1080x1920)
+    render_creator_crypto_vertical_screenshot("assets/screenshots/creator-crypto-vertical.png")
+    render_creator_ai_vertical_screenshot("assets/screenshots/creator-ai-vertical.png")
+
+    # 4. Legacy numbered screenshots updated to 1080p hero view
     render_preset_all_screenshot("assets/screenshots/01_desktop_overview.png")
     render_preset_all_screenshot("assets/screenshots/06_preset_all_dashboard.png")
     render_preset_ai_screenshot("assets/screenshots/08_preset_ai.png")
+
+    print("\nAll Milestone 14 screenshots generated successfully!")

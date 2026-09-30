@@ -30,7 +30,9 @@ ALL_PAGE_IDS = [
     # System
     "local_pc", "dgx_spark", "services", "coding", "ai_activity",
     # Stocks
-    "stocks_volatile",
+    "stocks_market_cap", "stocks_volatile",
+    # Signals & Predictions
+    "signals",
 ]
 
 PAGE_LABELS = {
@@ -48,28 +50,33 @@ PAGE_LABELS = {
     "services": "Workstation Services",
     "coding": "Active Workspace",
     "ai_activity": "AI Activity Monitor",
+    "stocks_market_cap": "Top 10 US Stocks",
     "stocks_volatile": "Top 10 Volatile Stocks",
+    "signals": "Polymarket & Signals",
 }
 
 SECTION_CRYPTO = "crypto"
 SECTION_AI_USAGE = "ai_usage"
 SECTION_SYSTEM = "system"
 SECTION_STOCKS = "stocks"
+SECTION_SIGNALS = "signals"
 
-ALL_SECTIONS = [SECTION_CRYPTO, SECTION_AI_USAGE, SECTION_SYSTEM, SECTION_STOCKS]
+ALL_SECTIONS = [SECTION_CRYPTO, SECTION_AI_USAGE, SECTION_SYSTEM, SECTION_STOCKS, SECTION_SIGNALS]
 
 SECTION_TITLES = {
     SECTION_CRYPTO: "CRYPTO MARKETS",
     SECTION_AI_USAGE: "AI USAGE",
     SECTION_SYSTEM: "SYSTEM & SERVICES",
-    SECTION_STOCKS: "VOLATILE STOCKS",
+    SECTION_STOCKS: "US EQUITIES",
+    SECTION_SIGNALS: "MARKET SIGNALS & PREDICTIONS",
 }
 
 DEFAULT_SECTION_CARDS = {
     SECTION_CRYPTO: ["btc", "eth", "sol", "doge", "pepe"],
     SECTION_AI_USAGE: ["codex", "gemini", "claude"],
     SECTION_SYSTEM: ["local_pc", "dgx_spark", "services", "coding", "ai_activity"],
-    SECTION_STOCKS: ["stocks_volatile"],
+    SECTION_STOCKS: ["stocks_market_cap"],
+    SECTION_SIGNALS: ["signals"],
 }
 
 # Presets
@@ -77,10 +84,12 @@ PRESET_ALL = "ALL"
 PRESET_AI = "AI"
 PRESET_CRYPTO = "CRYPTO"
 PRESET_STOCKS = "STOCKS"
+PRESET_SIGNALS = "SIGNALS"
 PRESET_SYSTEM = "SYSTEM"
 PRESET_MARKETS = "MARKETS"
 
-ALL_PRESETS = [PRESET_ALL, PRESET_AI, PRESET_CRYPTO, PRESET_STOCKS, PRESET_SYSTEM]
+ALL_PRESETS = [PRESET_ALL, PRESET_AI, PRESET_CRYPTO, PRESET_STOCKS, PRESET_SIGNALS, PRESET_SYSTEM]
+
 
 
 def get_app_dir() -> str:
@@ -152,7 +161,9 @@ class DashboardConfig:
     ])
 
     # Ditoo 16x16 Hardware Display Configuration
-    target_device: str = "ditoo"  # "minitoo", "ditoo", or "preview"
+    target_device: str = "auto"  # "minitoo", "ditoo", "dual", "desktop", "auto"
+    last_successful_device: Optional[str] = None
+    stock_mode: str = "market_cap"  # "market_cap", "volatile"
     ditoo_mac: str = "B1:21:81:5B:E3:16"
     ditoo_port: str = "AUTO"
     ditoo_auto_connect: bool = True
@@ -227,6 +238,10 @@ class DashboardConfig:
         if self.default_preset not in ALL_PRESETS and self.default_preset != PRESET_MARKETS:
             self.default_preset = PRESET_ALL
 
+        # Validate stock_mode
+        if self.stock_mode not in ("market_cap", "volatile"):
+            self.stock_mode = "market_cap"
+
         # Validate last_selected_page
         if self.last_selected_page not in ALL_PAGE_IDS:
             self.last_selected_page = "btc"
@@ -265,6 +280,7 @@ class DashboardConfig:
             self.enabled_sections[SECTION_SYSTEM] = True
             self.enabled_sections[SECTION_CRYPTO] = False
             self.enabled_sections[SECTION_STOCKS] = False
+            self.enabled_sections[SECTION_SIGNALS] = False
             for c in ALL_PAGE_IDS:
                 if c in ("codex", "gemini", "claude", "ai_activity"):
                     self.enabled_cards[c] = True
@@ -276,6 +292,7 @@ class DashboardConfig:
             self.enabled_sections[SECTION_AI_USAGE] = False
             self.enabled_sections[SECTION_SYSTEM] = False
             self.enabled_sections[SECTION_STOCKS] = False
+            self.enabled_sections[SECTION_SIGNALS] = False
             for c in ALL_PAGE_IDS:
                 if c in ("btc", "eth", "sol", "doge", "pepe", "crypto"):
                     self.enabled_cards[c] = True
@@ -287,8 +304,21 @@ class DashboardConfig:
             self.enabled_sections[SECTION_CRYPTO] = False
             self.enabled_sections[SECTION_AI_USAGE] = False
             self.enabled_sections[SECTION_SYSTEM] = False
+            self.enabled_sections[SECTION_SIGNALS] = False
             for c in ALL_PAGE_IDS:
-                if c in ("stocks_volatile",):
+                if c in ("stocks_market_cap", "stocks_volatile"):
+                    self.enabled_cards[c] = True
+                else:
+                    self.enabled_cards[c] = False
+
+        elif p == PRESET_SIGNALS:
+            self.enabled_sections[SECTION_SIGNALS] = True
+            self.enabled_sections[SECTION_CRYPTO] = False
+            self.enabled_sections[SECTION_STOCKS] = False
+            self.enabled_sections[SECTION_AI_USAGE] = False
+            self.enabled_sections[SECTION_SYSTEM] = False
+            for c in ALL_PAGE_IDS:
+                if c in ("signals",):
                     self.enabled_cards[c] = True
                 else:
                     self.enabled_cards[c] = False
@@ -296,10 +326,11 @@ class DashboardConfig:
         elif p in (PRESET_MARKETS,):
             self.enabled_sections[SECTION_CRYPTO] = True
             self.enabled_sections[SECTION_STOCKS] = True
+            self.enabled_sections[SECTION_SIGNALS] = True
             self.enabled_sections[SECTION_AI_USAGE] = False
             self.enabled_sections[SECTION_SYSTEM] = False
             for c in ALL_PAGE_IDS:
-                if c in ("btc", "eth", "sol", "doge", "pepe", "crypto", "stocks_volatile"):
+                if c in ("btc", "eth", "sol", "doge", "pepe", "crypto", "stocks_market_cap", "stocks_volatile", "signals"):
                     self.enabled_cards[c] = True
                 else:
                     self.enabled_cards[c] = False
@@ -309,11 +340,13 @@ class DashboardConfig:
             self.enabled_sections[SECTION_CRYPTO] = False
             self.enabled_sections[SECTION_AI_USAGE] = False
             self.enabled_sections[SECTION_STOCKS] = False
+            self.enabled_sections[SECTION_SIGNALS] = False
             for c in ALL_PAGE_IDS:
                 if c in ("local_pc", "dgx_spark", "services", "coding", "ai_activity"):
                     self.enabled_cards[c] = True
                 else:
                     self.enabled_cards[c] = False
+
 
     def get_active_pages(self) -> List[str]:
         """Return the enabled pages in the customized order for MiniToo rotation."""
@@ -389,12 +422,15 @@ class DashboardConfig:
                 {"id": "personal", "user_label": "Personal", "config_dir": os.path.expanduser("~/.claude")},
                 {"id": "secondary", "user_label": "Secondary", "config_dir": os.path.expanduser("~/.claude-secondary")},
             ]),
-            target_device=data.get("target_device", "ditoo"),
+            target_device=data.get("target_device", "auto"),
+            last_successful_device=data.get("last_successful_device", None),
+            stock_mode=data.get("stock_mode", "market_cap"),
             ditoo_mac=data.get("ditoo_mac", "B1:21:81:5B:E3:16"),
             ditoo_port=data.get("ditoo_port", "AUTO"),
             ditoo_auto_connect=bool(data.get("ditoo_auto_connect", True)),
             ditoo_auto_rotation=bool(data.get("ditoo_auto_rotation", True)),
             ditoo_is_paused=bool(data.get("ditoo_is_paused", False)),
+
             ditoo_enabled_crypto_page=bool(data.get("ditoo_enabled_crypto_page", True)),
             ditoo_enabled_stock_page=bool(data.get("ditoo_enabled_stock_page", True)),
             ditoo_enabled_cryptos=data.get("ditoo_enabled_cryptos", ["btc", "eth", "sol", "doge", "pepe"]),

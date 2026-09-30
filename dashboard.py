@@ -27,6 +27,8 @@ from collectors import (
     BtcCollector,
     MultiCryptoCollector,
     StockVolatilityCollector,
+    StockMarketCapCollector,
+    SignalsCollector,
     AiActivityCollector,
     ServicesCollector,
     provider_to_page_data,
@@ -52,7 +54,9 @@ PAGE_KEYS = [
     "coding",
     "services",
     "ai_activity",
+    "stocks_market_cap",
     "stocks_volatile",
+    "signals",
 ]
 
 
@@ -72,14 +76,19 @@ def collect_page(page_id: str, repo_path: str = ".", dgx_host: str = "dgx") -> P
         return MultiCryptoCollector().collect_overview()
     elif norm_id in ("btc", "eth", "sol", "doge", "pepe"):
         return MultiCryptoCollector().collect_asset(norm_id)
-    elif norm_id in ("stocks_volatile", "stocks", "stock"):
+    elif norm_id in ("stocks_market_cap", "stocks", "stock"):
+        return StockMarketCapCollector().collect()
+    elif norm_id in ("stocks_volatile",):
         return StockVolatilityCollector().collect()
+    elif norm_id in ("signals", "signal", "polymarket"):
+        return SignalsCollector().collect()
     elif norm_id in ("ai_activity", "activity"):
         return AiActivityCollector().collect()
     elif norm_id in ("services", "service"):
         return ServicesCollector(dgx_host=dgx_host).collect()
     else:
         raise ValueError(f"Unknown page key: '{page_id}'. Available: {PAGE_KEYS}")
+
 
 
 def collect_all_pages(repo_path: str = ".", dgx_host: str = "dgx") -> List[PageData]:

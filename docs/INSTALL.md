@@ -15,31 +15,28 @@ No Python, command line, or build tools required.
 2. Place `AI Desk Dashboard.exe` in any folder of your choice (e.g., `C:\Users\<YourUser>\AppData\Local\Programs\AiDeskDashboard\` or your Desktop).
 3. Double-click `AI Desk Dashboard.exe` to start.
 
-### 2. Pair Divoom MiniToo (Optional Hardware)
-If using the physical Divoom MiniToo display:
-1. Turn on your MiniToo.
-2. Open Windows **Settings → Bluetooth & devices → Add device**.
-3. Select **Bluetooth** and pair with `MiniToo-xxxx` (or `Divoom-xxxx`).
-4. Once paired, launch or reopen AI Desk Dashboard.
-5. The application automatically enumerates Bluetooth SPP serial ports and links to your MiniToo. The status in the header will switch to **MINITOO OK**.
+### 2. First-Run Setup & Display Selection
+On first launch, the **First-Run Device Setup Wizard** helps you select your display environment:
+1. **[ MiniToo ]**: Connects via Bluetooth Classic / SPP. Windows requires a one-time pairing under **Windows Settings → Bluetooth & devices**. The wizard provides a direct button: **[ OPEN WINDOWS BLUETOOTH SETTINGS ]**.
+2. **[ Ditoo ]**: Automatically scans for Divoom Ditoo / Ditoo Plus 16×16 RGB LED displays over Bluetooth LE (GATT).
+3. **[ No physical display ]**: Immediately starts in standalone Desktop Dashboard mode with background hardware discovery disabled.
+4. **[ Detect automatically ]**: Automatically scans available serial ports and Bluetooth adapters.
+
+See [docs/DEVICES.md](DEVICES.md) for full hardware discovery details and troubleshooting.
 
 ### 3. Customize Your Dashboard
 - **High-DPI & Desktop UI Scale**: Choose between `AUTO` (recommended, automatically detects your Windows monitor DPI), `100%`, `125%`, `150%`, `175%`, or `200%` under **Settings → GENERAL**.
 - **Keyboard Shortcuts**:
   - `Ctrl+,` or `Ctrl+P`: Open Settings modal.
-  - `1..5`: Switch presets (`1`=ALL, `2`=AI, `3`=CRYPTO, `4`=STOCKS, `5`=SYSTEM).
+  - `1..6`: Switch presets (`1`=ALL, `2`=AI, `3`=CRYPTO, `4`=STOCKS, `5`=SIGNALS, `6`=SYSTEM).
   - `F11`: Toggle fullscreen presentation mode.
   - `Esc`: Instantly exit Focus Mode, Creator Mode, or Fullscreen.
 - **Creator Capture Mode**: Click the **🎬 CREATOR** button in the header for a clean, distraction-free recording surface tailored for OBS, YouTube Shorts, and Reels. Toggle between **16:9** and **9:16 Vertical Shorts** with one click.
 - **Creator Focus Mode**: Click `[ 🔍 FOCUS ]` on any section header to film or view that section in a dedicated enlarged hero layout. Click `[ ◀ BACK TO ALL ]` or press `Esc` to return.
-- **Redesigned 5-Tab Settings**: Click the **⚙ SETTINGS** button in the header to open the categorized configuration modal:
-  - **GENERAL**: Windows startup (`HKCU\Run`), launch minimized, desktop UI scale selector (`AUTO`, `100%`, `125%`, `150%`, `175%`, `200%`), and reset window dimensions.
-  - **DASHBOARD**: Expandable section tree with independent **Desktop [x]** and **MiniToo [x]** toggles per card, plus dedicated `▲` / `▼` ordering buttons.
-  - **MINITOO**: Bluetooth connection status, transport mode (**NORMAL** vs **LOW INTERFERENCE**), auto-cycle toggle, dwell interval (seconds per page), knob toggle, poll rate, live rolling 60-second telemetry, and hardware action buttons (**TEST DISPLAY**, **RECONNECT**, **COPY DIAGNOSTICS**).
-  - **INTEGRATIONS**: Remote DGX Spark hostname/Tailscale IP, optional Finnhub API key, and Claude account profile discovery.
-  - **ADVANCED**: Protocol debug logs and diagnostic reporting.
-- **Bluetooth Headphones / Audio Coexistence**:
-  If your Bluetooth headphones or speakers experience audio stutters or drops while communicating with the MiniToo, set **Bluetooth Mode** to **LOW INTERFERENCE** under **Settings → MiniToo**. This throttles knob polling to ~2.8 Hz and elides redundant frame transfers, freeing 2.4 GHz radio airtime. For complete troubleshooting, see [docs/BLUETOOTH.md](BLUETOOTH.md).
+- **Interactive Device Panel**: Click the device status pill in the top header to view active transport, last seen timestamp, RSSI signal, and trigger manual Reconnect or Diagnostics.
+- **Redesigned Settings Modal**: Click **⚙ SETTINGS** to configure sections, reorder cards, toggle independent Desktop vs MiniToo visibility, and adjust dwell timings.
+- **Bluetooth Audio Coexistence**:
+  If your Bluetooth headphones or speakers experience audio stutters or drops while communicating with the MiniToo, set **Bluetooth Mode** to **LOW INTERFERENCE** under **Settings → MiniToo**. This throttles knob polling to ~2.8 Hz and elides redundant frame transfers. For complete troubleshooting, see [docs/BLUETOOTH.md](BLUETOOTH.md).
 
 ---
 
@@ -52,12 +49,18 @@ AI Desk Dashboard connects to local developer tools, system sensors, and market 
 - **Cache**: 60-second local JSON cache (`.crypto_cache.json`) to stay within public rate limits without needing exchange credentials.
 - **Micro-Token Formatting**: For tokens under $0.01 (such as PEPE at ~$0.0000045), prices format cleanly as `$0.0000045` on desktop and `$4.5u` on MiniToo displays.
 
-### 2. Top 10 Volatile US Stocks Scanner
-- **How it works**: Evaluates a high-volume liquid US equities basket and ranks the Top 10 by objective intraday volatility:
-  $$\text{Volatility \%} = \frac{\text{Day High} - \text{Day Low}}{\text{Previous Close}} \times 100$$
-- **Default Provider**: `YahooFinanceMarketDataProvider` (zero API key required; fetches quotes via session cookies and crumbs with a 60-second cache).
-- **Optional Finnhub Provider**: Set the environment variable `FINNHUB_API_KEY` to route quotes through Finnhub's official REST API.
-- **Market Hours**: Automatically detects regular trading hours (`OPEN`), pre-market (`PRE`), after-hours (`POST`), or weekend/holiday (`CLOSED`).
+### 2. Top 10 US Equities by Market Cap (Rich Cards)
+- **How it works**: Displays the 10 largest US companies by market capitalization in a responsive card grid (5 cards/row × 2 rows at 1080p).
+- **Required Fields**: Symbol, company name, spot price, day change %, market cap ($T/$B), 1D intraday sparkline, market state, data source, and timestamp.
+- **Share-Class Deduplication**: Automatically consolidates multiple share classes (e.g. `GOOGL` / `GOOG` or `BRK-A` / `BRK-B`) so Google or Berkshire only occupies a single spot.
+- **Secondary Mode**: Toggle to `[ VOLATILE ]` mode for the high-beta day volatility scanner.
+- **Default Provider**: `YahooFinanceMarketDataProvider` (zero API key required; fetches quotes via session cookies and crumbs with a 60-second cache). Optional `FINNHUB_API_KEY` supported.
+
+### 3. Signals & Prediction Markets (Polymarket)
+- **How it works**: Ingests real-time event probabilities from the public Polymarket Gamma API.
+- **Attention Ranking**: Ranks top events using a deterministic formula balancing 24h probability delta, trading volume, and liquidity.
+- **Related News**: Matches structured financial RSS headlines beneath signal cards. See [docs/SIGNALS.md](SIGNALS.md).
+
 
 ### 3. Anthropic Claude (Diagnostics & Secondary Profile)
 - **Account Discovery**: Safely inspects active authentication from `~/.claude.json`. Displays account email (masked: `no***@gmail.com`), subscription plan tier, and auth type.

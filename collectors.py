@@ -16,10 +16,12 @@ import threading
 import time
 from typing import Optional, Dict, Any
 
-from models import MetricItem, PageData, CryptoAsset, StockQuote, ClaudeAccountProfile
+from models import MetricItem, PageData, CryptoAsset, StockQuote, ClaudeAccountProfile, PredictionMarketSignal, NewsHeadline
 from providers import get_provider, UsageData
 from subproc import check_output_hidden, run_hidden
 from market_provider import get_market_data_provider
+from signals_provider import get_signals_provider
+
 
 
 # ==============================================================================
@@ -943,11 +945,133 @@ class StockVolatilityCollector:
         )
 
 
+# ==============================================================================
+# 5C. STOCK MARKET CAP COLLECTOR (TOP 10 US EQUITIES BY MARKET CAP)
+# ==============================================================================
+class StockMarketCapCollector:
+    """Collects top 10 US equities by market capitalization with intraday sparklines."""
+
+    def collect(self) -> PageData:
+        provider = get_market_data_provider()
+        quotes = provider.get_top_market_cap_stocks(10)
+
+        if not quotes:
+            return PageData(
+                page_id="stocks_market_cap",
+                title="US EQUITIES",
+                badge="OFFLINE",
+                badge_color="red",
+                is_offline=True,
+                offline_msg="MARKET DATA OFFLINE",
+                offline_sub="UNAVAILABLE",
+                source_info="YahooFinance / MarketProvider",
+            )
+
+        top_quote = quotes[0]
+        mkt_state = top_quote.market_state.upper()
+        state_badge = "OPEN" if "REGULAR" in mkt_state else ("POST" if "POST" in mkt_state else ("PRE" if "PRE" in mkt_state else "CLOSED"))
+        state_color = "green" if state_badge == "OPEN" else "amber"
+
+        pm = MetricItem(
+            label=f"#1 {top_quote.symbol}",
+            value=f"${top_quote.price:,.2f}",
+            reset=f"CAP {top_quote.formatted_market_cap}",
+            authority="AUTHORITATIVE",
+        )
+        sm = None
+        if len(quotes) > 1:
+            q2 = quotes[1]
+            sm = MetricItem(
+                label=f"#2 {q2.symbol}",
+                value=f"${q2.price:,.2f}",
+                reset=f"CAP {q2.formatted_market_cap}",
+                authority="AUTHORITATIVE",
+            )
+
+        return PageData(
+            page_id="stocks_market_cap",
+            title="TOP 10 US STOCKS",
+            badge=state_badge,
+            badge_color=state_color,
+            primary_metric=pm,
+            secondary_metric=sm,
+            stocks_data=quotes,
+            sparkline_data=top_quote.sparkline,
+            footer_left=f"TOP 10 BY MARKET CAP",
+            footer_right=state_badge,
+            source_info=f"{top_quote.source} — Market Capitalization",
+        )
+
+
+# ==============================================================================
+# 5D. SIGNALS & PREDICTION MARKETS COLLECTOR
+# ==============================================================================
+class SignalsCollector:
+    """Collects high-signal prediction events from Polymarket and curated macro news."""
+
+    def collect(self) -> PageData:
+        provider = get_signals_provider()
+        signals = provider.get_signals(5)
+        news = provider.get_news(6)
+
+        if not signals:
+            return PageData(
+                page_id="signals",
+                title="SIGNALS",
+                badge="OFFLINE",
+                badge_color="red",
+                is_offline=True,
+                offline_msg="SIGNALS OFFLINE",
+                offline_sub="UNAVAILABLE",
+                source_info="Polymarket Gamma API",
+            )
+
+        top_sig = signals[0]
+        # Compact question label for 128px displays (e.g. "FED CUT BY DEC?", "BTC > $100K?")
+        q_label = top_sig.question.replace("Will the ", "").replace("Will ", "").replace("is ", "").strip()
+        if len(q_label) > 18:
+            q_label = q_label[:17] + "?"
+
+        pm = MetricItem(
+            label=q_label.upper(),
+            value=top_sig.formatted_prob,
+            reset=f"▲ {top_sig.formatted_change}",
+            authority="CALCULATED",
+        )
+        sm = None
+        if len(signals) > 1:
+            s2 = signals[1]
+            q2_label = s2.question.replace("Will the ", "").replace("Will ", "").replace("is ", "").strip()
+            if len(q2_label) > 18:
+                q2_label = q2_label[:17] + "?"
+            sm = MetricItem(
+                label=q2_label.upper(),
+                value=s2.formatted_prob,
+                reset=f"▲ {s2.formatted_change}",
+                authority="CALCULATED",
+            )
+
+        return PageData(
+            page_id="signals",
+            title="SIGNALS",
+            badge="POLYMARKET",
+            badge_color="blue",
+            primary_metric=pm,
+            secondary_metric=sm,
+            signals_data=signals,
+            news_data=news,
+            footer_left="IMPLIED PROBABILITIES",
+            footer_right="POLYMARKET ODDS",
+            source_info="Polymarket Gamma API • Public Read-Only",
+        )
+
+
 
 # ==============================================================================
 # 6. AI ACTIVITY COLLECTOR (HONEST LOCAL WORKING VS IDLE DETECTION)
 # ==============================================================================
 class AiActivityCollector:
+
     """Collects real-time local activity status (WORKING vs IDLE) for AI coding agents."""
 
     def collect(self) -> PageData:

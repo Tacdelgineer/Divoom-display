@@ -4,121 +4,98 @@
 
 # AI Desk Dashboard
 
-**A retro desktop + physical desk dashboard for AI usage, system stats, multi-asset markets, stock scanner, and remote machines.**
+> **"Your AI, markets, and machines — at a glance."**
+
+A high-performance retro desktop command center and physical desk companion for AI usage quotas, live markets, dynamic stock cards, high-signal prediction odds, and workstation telemetry.
+
+<div align="center">
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6?style=flat-square&logo=windows)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
-[![Hardware](https://img.shields.io/badge/Hardware-Divoom%20MiniToo%20(Optional)-00F5D4?style=flat-square)](#supported-hardware)
-[![Version](https://img.shields.io/badge/Release-v0.4.0-orange?style=flat-square)](docs/RELEASE_NOTES_v0.1.0.md)
+[![Hardware](https://img.shields.io/badge/Displays-Desktop%20%7C%20MiniToo%20%7C%20Ditoo-00F5D4?style=flat-square)](#-supported-displays--modes)
+[![Version](https://img.shields.io/badge/Release-v0.5.0--M15-orange?style=flat-square)](docs/RELEASE_NOTES_v0.1.0.md)
+
+<br/>
+
+<img src="assets/screenshots/desktop-all-1080p.png" alt="AI Desk Dashboard 1080p Command Center" width="960" />
 
 </div>
 
 ---
 
-## ⚡ Highlights
+## 🎯 Core Sections at a Glance
 
-- **High-DPI Desktop Command Center (Milestone 14 & 14.1 Hotfix)**:
-  - Fixed & pinned navigation header with native retro buttons, instant hand-cursor hover feedback, and guaranteed click dispatch across 100%, 125%, 150%, 175%, and 200% DPI scales.
-  - Generous header spacing with decoupled device reconnection: peripheral reconnections (MiniToo / Ditoo) never disable Settings, Creator view, or Presets.
-  - True Windows **Per-Monitor-V2 DPI Awareness** (`SetProcessDpiAwarenessContext(-4)`), rendering razor-sharp text and graphics on 100%, 125%, 150%, 175%, and 200% display scaling without blurry OS bitmap virtualization.
-  - Centralized **UI Scale Engine** (`ui_scale.py`) with user-selectable scaling: `AUTO`, `100%`, `125%`, `150%`, `175%`, `200%`.
-  - Modern default command center geometry (**1240×780**), with full window state restoration (width, height, x/y position, maximized state).
-- **Responsive Dynamic Card Grid**:
-  - Automatically calculates column count based on available monitor width and readable min/max card bounds (260px – 420px).
-  - On 1080p and 1440p displays, all 5 crypto assets (**BTC | ETH | SOL | DOGE | PEPE**) fit cleanly in a single spacious row without awkward stretching into ultra-wide rectangles.
+<div align="center">
+<table>
+<tr>
+  <td align="center"><b>🤖 AI Quotas & Diagnostic Profiles</b></td>
+  <td align="center"><b>🪙 Crypto Markets (5-Asset Spot & Sparklines)</b></td>
+</tr>
+<tr>
+  <td><img src="assets/screenshots/desktop-ai-1080p.png" width="460" alt="AI Quotas Preset" /></td>
+  <td><img src="assets/screenshots/desktop-crypto-1080p.png" width="460" alt="Crypto Markets Preset" /></td>
+</tr>
+<tr>
+  <td align="center"><b>📈 Top 10 US Equities by Market Cap</b></td>
+  <td align="center"><b>🎲 Signals & Polymarket Prediction Odds</b></td>
+</tr>
+<tr>
+  <td><img src="assets/screenshots/desktop-stocks-1080p.png" width="460" alt="Stocks Market Cap Preset" /></td>
+  <td><img src="assets/screenshots/desktop-signals-1080p.png" width="460" alt="Signals Preset" /></td>
+</tr>
+<tr>
+  <td colspan="2" align="center"><b>💻 Workstation Telemetry & Remote DGX Clusters</b></td>
+</tr>
+<tr>
+  <td colspan="2" align="center"><img src="assets/screenshots/desktop-system-1080p.png" width="930" alt="System Hardware Preset" /></td>
+</tr>
+</table>
+</div>
+
+---
+
+## 🖥️ Supported Displays & Modes
+
+| Display Mode | Hardware | Communication | Capabilities |
+| :--- | :--- | :--- | :--- |
+| **Desktop-Only** | Any Windows PC | Native GUI (`tkinter` + PIL) | Full standalone command center. A missing physical device **never** hangs startup or breaks desktop features. |
+| **MiniToo** | Divoom MiniToo | Bluetooth Classic / SPP | 160×128 color IPS LCD with live graphs, AI quota progress, and rotary knob channel navigation. |
+| **Ditoo** | Divoom Ditoo / Plus | Bluetooth LE (GATT) | 16×16 RGB LED pixel matrix with rotating crypto/stock ticker animations and mechanical key control. |
+| **Dual-Display** | MiniToo + Ditoo | SPP + BLE Concurrent | Stream full telemetry on MiniToo while streaming high-contrast pixel alerts on Ditoo simultaneously. |
+
+---
+
+## ⚡ Milestone 15 Highlights
+
+- **First-Run Device Onboarding Wizard**:
+  - Friendly 4-choice setup screen: `[ MiniToo ]`, `[ Ditoo ]`, `[ No physical display ]`, and `[ Detect automatically ]`.
+  - Truthful Windows pairing guidance: launches `ms-settings:bluetooth` when pairing is required.
+  - Interactive compact device status panel: `CONNECTED`, `CONNECTING`, `RECONNECTING`, `PAIRING REQUIRED`, `NOT FOUND`, `OFFLINE` with Reconnect, Forget, and Diagnostics controls.
+- **Dynamic US Equities by Market Cap**:
+  - Replaces tiny stock tables with a rich 10-card grid (5 cards/row × 2 rows at 1080p with responsive reflow).
+  - 9 required fields per card: Symbol, Company Name, Price, Day Change %, Market Cap, Intraday 1D Sparkline, Market State, Source, Fetched At.
+  - Corporate share-class deduplication: retains only the highest-cap class (e.g. `GOOGL` over `GOOG`, `BRK-B` over `BRK-A`).
+  - Secondary mode toggle: switch seamlessly between **`[ MARKET CAP ]`** and **`[ VOLATILE ]`**.
+- **Signals & Prediction Markets Intelligence**:
+  - Public, read-only **Polymarket Gamma API** integration (zero wallets, zero keys, zero trading).
+  - Explicit market-implied probability semantics (not asserted facts).
+  - Deterministic **Attention Scoring** formula balances probability moves against volume and liquidity.
+  - Curated financial RSS news headlines contextualized beneath signal cards.
 - **Creator Capture Views (16:9 & 9:16 Shorts)**:
-  - Dedicated filming modes for OBS, screen recording, and mobile video (YouTube Shorts, TikTok, Reels).
-  - Clean composition stripped of settings buttons and debug clutter.
-  - Dedicated **9:16 Vertical Shorts** stacked hero layout for instant mobile video production.
-- **Keyboard & Mouse Command Shortcuts**:
-  - `Ctrl+,` or `Ctrl+P`: Instant Settings Dialog
+  - Clean composition stripped of settings chrome for OBS and mobile video production.
+  - Vertical 9:16 stacked card format for YouTube Shorts, TikTok, and Instagram Reels.
+- **Keyboard Shortcuts**:
   - `1`: ALL Preset
   - `2`: AI Quotas Preset
   - `3`: CRYPTO Markets Preset
-  - `4`: STOCKS Volatility Scanner Preset
-  - `5`: SYSTEM Hardware Preset
+  - `4`: STOCKS Equities Preset
+  - `5`: SIGNALS Prediction Markets Preset
+  - `6`: SYSTEM Hardware Preset
+  - `Ctrl+,` or `Ctrl+P`: Settings Dialog
   - `F11`: Fullscreen presentation mode
-  - `Esc`: Quick exit from Fullscreen, Creator Mode, or Section Focus
-- **Redesigned 5-Tab Settings UX**: Clean, retro left-navigation layout (**GENERAL**, **DASHBOARD**, **MINITOO**, **INTEGRATIONS**, **ADVANCED**).
-- **Independent Desktop vs MiniToo Visibility**: Configure card visibility separately for the desktop application vs physical desk display (`BTC: Desktop [x] MiniToo [x]`, `Coding: Desktop [x] MiniToo [ ]`).
-- **Bluetooth Coexistence Engine**:
-  - Solves real-world Bluetooth headphone and speaker audio stuttering caused by serial polling contention on shared radios (e.g., MediaTek RZ616 / Intel AX211).
-  - Selectable **NORMAL** vs **LOW INTERFERENCE** transport modes.
-  - Reduced knob polling from 16 Hz down to ~2.8–4 Hz; decoupled background collector refreshes from display transmissions; completely elides redundant identical frames (0 unnecessary transmissions).
-  - Live rolling 60-second telemetry: SPP writes/min, reads/min, frames/min, throughput (KB/min), reconnects, and error counts under **Settings → MiniToo**. See [docs/BLUETOOTH.md](docs/BLUETOOTH.md).
-- **Top 10 Volatile Stocks Scanner**: Objective intraday high-low range ranking with live prices, percentage deltas, and Yahoo Finance / Finnhub crumb session backends.
-- **Authoritative AI Quotas (% LEFT)**: Tracks live, authoritative quotas for OpenAI Codex and Google Gemini / Antigravity with strict `% LEFT` semantics, plus Claude account diagnostic inspection (`no***@gmail.com`).
-- **Zero Console Flashing on Windows**: Subprocesses execute silently via `subproc.py` using `CREATE_NO_WINDOW = 0x08000000` and `SW_HIDE`.
+  - `Esc`: Quick exit from Fullscreen / Creator Mode
 
----
-
-## 📸 Screenshots
-
-### 1. 1080p Desktop Command Center (ALL Preset)
-The high-resolution desktop command center showing all 4 responsive sections (Crypto Markets, AI Subscriptions, Volatile Stocks Scanner, Workstation Hardware & Services) with active MiniToo synchronization:
-
-<div align="center">
-  <img src="assets/screenshots/preset-all.png" alt="1080p Desktop Command Center" width="920" />
-</div>
-
-### 2. Creator Capture Mode (9:16 Vertical Shorts & Reels)
-Zero-clutter presentation mode tailored for vertical filming (OBS / screen recording), featuring stacked crypto assets (BTC, ETH, SOL, DOGE, PEPE) and AI subscription quotas:
-
-<div align="center">
-  <img src="assets/screenshots/creator-crypto-vertical.png" alt="Creator View 9:16 Crypto Shorts" width="340" />
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="assets/screenshots/creator-ai-vertical.png" alt="Creator View 9:16 AI Shorts" width="340" />
-</div>
-
-### 3. Crypto Hero Preset & Focus Presentation Mode
-Expanded presentation view featuring 5-asset responsive layout, live spot prices, and 24-point phosphor sparklines for BTC, ETH, SOL, DOGE, and PEPE:
-
-<div align="center">
-  <img src="assets/screenshots/preset-crypto.png" alt="Crypto Hero Preset" width="920" />
-</div>
-
-### 4. Stocks Volatility Scanner Terminal
-Full-width financial ranking terminal emphasizing intraday volatility percentage, price, day change, range meter, and market session state:
-
-<div align="center">
-  <img src="assets/screenshots/preset-stocks.png" alt="Stocks Volatility Scanner Terminal" width="920" />
-</div>
-
-### 5. AI Subscription Quotas Preset (% LEFT & Reset Timers)
-Authoritative quota visualization showing percentage remaining, 16-block segmented progress gauges, reset countdowns, and local AI agent activity daemons:
-
-<div align="center">
-  <img src="assets/screenshots/preset-ai.png" alt="AI Quotas Preset" width="920" />
-</div>
-
-### 6. Workstation Hardware & Remote DGX Cluster Telemetry
-Local RTX 5080 GPU telemetry, remote DGX Spark compute node load/VRAM, and internal service health checks:
-
-<div align="center">
-  <img src="assets/screenshots/preset-system.png" alt="System Hardware Preset" width="920" />
-</div>
-
-### 7. Scaled High-DPI Settings: Dashboard & Card Visibility
-Left-navigation layout with centralized Desktop UI Scale options, independent `Desktop [x]` vs `MiniToo [x]` toggles, and per-item reordering arrows:
-
-<div align="center">
-  <img src="assets/screenshots/settings-dashboard.png" alt="Settings Dashboard Tab" width="720" />
-</div>
-
-### 8. Scaled High-DPI Settings: MiniToo & Bluetooth Telemetry
-Live 60-second rolling Bluetooth metrics, Low Interference mode toggle, dwell timing, and display diagnostics:
-
-<div align="center">
-  <img src="assets/screenshots/settings-minitoo.png" alt="Settings MiniToo Tab" width="720" />
-</div>
-
-### 9. Physical MiniToo Desk Display
-Live Gemini model quota running on a physical Divoom MiniToo 160×128 desk display:
-
-<div align="center">
-  <img src="assets/screenshots/minitoo_desk_photo.png" alt="Physical Divoom MiniToo on Desk" width="460" />
-</div>
 ---
 
 ## 🚀 Quick Start

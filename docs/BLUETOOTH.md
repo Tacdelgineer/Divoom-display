@@ -8,6 +8,10 @@ This document details the Bluetooth communication architecture of **AI Desk Dash
 
 The **Divoom MiniToo** communicates with the host PC using **Bluetooth Classic Serial Port Profile (SPP)** over RFCOMM on standard Windows COM ports (e.g., `COM13`).
 
+> [!IMPORTANT]
+> **Windows Classic Bluetooth Pairing Truthfulness:**
+> Windows requires Bluetooth Classic (RFCOMM/SPP) devices to be paired at the operating system level before a virtual serial port (e.g. `COM13`) is assigned. The application does not silently pair Classic Bluetooth in the background without user intervention. The dashboard provides an interactive **[ OPEN WINDOWS BLUETOOTH SETTINGS ]** button (`ms-settings:bluetooth`) to initiate pairing effortlessly. See [docs/DEVICES.md](DEVICES.md) for full setup workflows.
+
 ### SPP Packet Framing
 Every transaction between the PC and the MiniToo is framed with a proprietary Divoom packet structure:
 ```
@@ -16,6 +20,7 @@ Every transaction between the PC and the MiniToo is framed with a proprietary Di
 - **Image Transmission:** A 160×128 pixel 16-bit RGB565 framebuffer requires 40,960 raw bytes, divided into framed chunks (initial `0x44` command header + subsequent chunk packets).
 - **Physical Controls (Rotary Knob / Volume):** Polled via command `0x09` (read volume / control state) or centered base volume resets via `0x08`.
 - **Channel Ownership:** Polled via command `0xBD 0x13` to confirm the device remains in Custom/DIY Channel 5.
+
 
 ---
 

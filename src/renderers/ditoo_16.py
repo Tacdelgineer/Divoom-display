@@ -525,6 +525,65 @@ class Stock16Renderer:
 
 
 # ==============================================================================
+# SIGNAL / POLYMARKET RENDERER (16x16: Prediction Odds, deltas)
+# ==============================================================================
+class Signal16Renderer:
+    """Generates 16x16 frame sequences for Polymarket prediction odds."""
+
+    @staticmethod
+    def render_topic_frame(topic: str) -> Image.Image:
+        """Frame 1: Short topic code with emerald border."""
+        t = topic.upper().strip()[:4]
+        img = Image.new("RGB", (16, 16), COLOR_BLACK)
+        draw = ImageDraw.Draw(img)
+        draw.line([(2, 2), (13, 2)], fill=COLOR_GREEN)
+        w = measure_text(t)
+        draw_text(img, t, x=max(0, (16 - w) // 2), y=5, color=COLOR_WHITE)
+        draw.line([(2, 13), (13, 13)], fill=COLOR_GREEN)
+        return img
+
+    @staticmethod
+    def render_probability_frame(prob_pct: int) -> Image.Image:
+        """Frame 2: Prediction probability percentage (e.g. 64%)."""
+        img = Image.new("RGB", (16, 16), COLOR_BLACK)
+        p_str = f"{prob_pct}%"
+        w = measure_text(p_str)
+        draw_text(img, p_str, x=max(0, (16 - w) // 2), y=5, color=COLOR_CYAN)
+        return img
+
+    @staticmethod
+    def render_delta_frame(delta_pts: float) -> Image.Image:
+        """Frame 3: Points movement with arrow."""
+        img = Image.new("RGB", (16, 16), COLOR_BLACK)
+        arrow = '▲' if delta_pts >= 0 else '▼'
+        col = COLOR_GREEN if delta_pts >= 0 else COLOR_RED
+        draw_text(img, arrow, x=6, y=2 if delta_pts >= 0 else 3, color=col)
+        pts_str = f"{abs(delta_pts):.0f}" if abs(delta_pts) >= 10 else f"{abs(delta_pts):.1f}"
+        w = measure_text(pts_str)
+        draw_text(img, pts_str, x=max(0, (16 - w) // 2), y=9, color=col)
+        return img
+
+    @staticmethod
+    def render_split_frame(topic: str, prob_pct: int) -> Image.Image:
+        """Split view: Topic code on top, probability on bottom."""
+        t = topic.upper().strip()[:4]
+        img = Image.new("RGB", (16, 16), COLOR_BLACK)
+        draw_text(img, t, x=1, y=1, color=COLOR_GREEN)
+        p_str = f"{prob_pct}%"
+        w = measure_text(p_str)
+        draw_text(img, p_str, x=max(0, (16 - w) // 2), y=9, color=COLOR_CYAN)
+        return img
+
+    @classmethod
+    def render_cycle_frames(cls, topic: str, prob_pct: int, delta_pts: float) -> List[Image.Image]:
+        return [
+            cls.render_topic_frame(topic),
+            cls.render_probability_frame(prob_pct),
+            cls.render_delta_frame(delta_pts),
+        ]
+
+
+# ==============================================================================
 # HORIZONTAL SCROLLER
 # ==============================================================================
 def render_scrolling_text_strip(

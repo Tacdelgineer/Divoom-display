@@ -32,8 +32,9 @@ from config import (
     PRESET_MARKETS,
     PRESET_SYSTEM,
 )
-from detector import detect_minitoo_port, get_all_com_ports
+from detector import detect_minitoo_port, get_all_com_ports, detect_minitoo_connection_state, open_windows_bluetooth_settings
 from subproc import check_output_hidden, run_hidden
+
 from ui_scale import ui_scale, UI_SCALE_OPTIONS
 import claude_usage
 
@@ -55,12 +56,15 @@ C_TEXT_DIM = "#505E73"
 
 
 # ==============================================================================
-# 1. FIRST-RUN STATUS / SYSTEM DETECTION DIALOG
+# 1. FIRST-RUN DEVICE SETUP WIZARD (MILESTONE 15)
 # ==============================================================================
 class FirstRunDialog(tk.Toplevel):
     """
-    First-launch detection screen showing status of MiniToo and all service integrations.
-    Non-blocking detection; does not require login or block if a service is unavailable.
+    First-run device onboarding wizard (Milestone 15).
+    Guides new users through selecting and connecting a supported physical display
+    (MiniToo Bluetooth Classic / SPP, Ditoo Bluetooth LE, Dual, or Desktop-Only).
+    Truthful Bluetooth behavior: explicitly prompts for Windows pairing when required
+    and never hangs startup when hardware is absent.
     """
 
     def __init__(self, parent: tk.Tk, config: DashboardConfig, on_open_dashboard: Callable[[], None]):
@@ -68,170 +72,452 @@ class FirstRunDialog(tk.Toplevel):
         self.config = config
         self.on_open_dashboard = on_open_dashboard
 
-        self.title("AI Desk Dashboard — System Setup")
-        self.geometry("440x510")
+        self.title("AI Desk Dashboard — First-Run Device Setup")
+        self.geometry("520x620")
         self.resizable(False, False)
         self.configure(bg=C_BG)
         self.transient(parent)
         self.grab_set()
 
         self.update_idletasks()
-        px = parent.winfo_x() + (parent.winfo_width() - 440) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - 510) // 2
+        px = parent.winfo_x() + (parent.winfo_width() - 520) // 2
+        py = parent.winfo_y() + (parent.winfo_height() - 620) // 2
         self.geometry(f"+{max(40, px)}+{max(30, py)}")
 
-        self.status_labels: Dict[str, tk.Label] = {}
-        self._build_ui()
-        self._run_probes()
+        self.container = tk.Frame(self, bg=C_BG)
+        self.container.pack(fill="both", expand=True)
 
-    def _build_ui(self):
-        h_frame = tk.Frame(self, bg=C_BG)
-        h_frame.pack(fill="x", padx=20, pady=(20, 10))
+        self._show_screen_1()
+
+    def _clear_container(self):
+        for w in self.container.winfo_children():
+            w.destroy()
+
+    def _show_screen_1(self):
+        """Screen 1: Choose Your Display."""
+        self._clear_container()
+
+        h_frame = tk.Frame(self.container, bg=C_BG)
+        h_frame.pack(fill="x", padx=24, pady=(24, 12))
 
         tk.Label(
             h_frame,
             text="AI DESK DASHBOARD",
-            font=("Consolas", 14, "bold"),
+            font=("Consolas", 15, "bold"),
             fg=C_CYAN,
             bg=C_BG,
         ).pack(anchor="w")
 
         tk.Label(
             h_frame,
-            text="HARDWARE & SERVICE DETECTION",
-            font=("Consolas", 8),
-            fg=C_TEXT_DIM,
+            text="FIRST-RUN DEVICE ONBOARDING",
+            font=("Consolas", 9, "bold"),
+            fg=C_TEXT_WHITE,
             bg=C_BG,
         ).pack(anchor="w", pady=(2, 0))
 
-        tbl = tk.Frame(self, bg=C_PANEL_BG, highlightbackground=C_BORDER, highlightthickness=1)
-        tbl.pack(fill="both", expand=True, padx=20, pady=10)
+        tk.Label(
+            h_frame,
+            text="Choose your display hardware to begin:",
+            font=("Consolas", 9),
+            fg=C_TEXT_MUTED,
+            bg=C_BG,
+        ).pack(anchor="w", pady=(4, 0))
 
-        rows = [
-            ("minitoo", "MiniToo"),
-            ("codex", "Codex"),
-            ("gemini", "Gemini"),
-            ("claude", "Claude"),
-            ("gpu", "Local GPU"),
-            ("dgx", "DGX Spark"),
-            ("crypto", "Crypto Markets"),
-            ("stocks", "Stocks Scanner"),
-        ]
+        content = tk.Frame(self.container, bg=C_BG)
+        content.pack(fill="both", expand=True, padx=24, pady=8)
 
-        for idx, (key, title) in enumerate(rows):
-            rf = tk.Frame(tbl, bg=C_PANEL_BG)
-            rf.pack(fill="x", padx=16, pady=7)
+        # 1. MiniToo Card
+        self._create_display_option_card(
+            content,
+            title="MiniToo",
+            subtitle="Bluetooth Classic / SPP (160x128 16-bit color LCD)",
+            detail="Divoom MiniToo with hardware rotary knob & live AI quotas",
+            color=C_CYAN,
+            action=lambda: self._select_minitoo_flow(),
+        )
 
-            tk.Label(
-                rf,
-                text=title,
-                font=("Consolas", 10, "bold"),
-                fg=C_TEXT_WHITE,
-                bg=C_PANEL_BG,
-                width=16,
-                anchor="w",
-            ).pack(side="left")
+        # 2. Ditoo Card
+        self._create_display_option_card(
+            content,
+            title="Ditoo",
+            subtitle="Bluetooth LE (16x16 Pixel Matrix)",
+            detail="Divoom Ditoo / Ditoo-Pro retro pixel speaker display",
+            color=C_PURPLE,
+            action=lambda: self._select_ditoo_flow(),
+        )
 
-            lbl = tk.Label(
-                rf,
-                text="PROBING...",
-                font=("Consolas", 9, "bold"),
-                fg=C_AMBER,
-                bg=C_PANEL_BG,
-                anchor="e",
+        # 3. Desktop Only Card
+        self._create_display_option_card(
+            content,
+            title="No physical display",
+            subtitle="Desktop dashboard only (Monitor Command Center)",
+            detail="Full high-DPI desktop experience with no hardware required",
+            color=C_GREEN,
+            action=lambda: self._select_desktop_only(),
+        )
+
+        # 4. Auto Detect Card
+        self._create_display_option_card(
+            content,
+            title="Detect automatically",
+            subtitle="Scan for paired MiniToo and BLE Ditoo displays",
+            detail="Automatically discovers available hardware and configures mode",
+            color=C_AMBER,
+            action=lambda: self._select_auto_detect(),
+        )
+
+    def _create_display_option_card(self, parent: tk.Widget, title: str, subtitle: str, detail: str, color: str, action: Callable[[], None]):
+        card = tk.Frame(parent, bg=C_PANEL_BG, highlightbackground=C_BORDER, highlightthickness=1, cursor="hand2")
+        card.pack(fill="x", pady=6)
+
+        def on_enter(e):
+            card.config(highlightbackground=color, bg="#131B2A")
+        def on_leave(e):
+            card.config(highlightbackground=C_BORDER, bg=C_PANEL_BG)
+
+        card.bind("<Enter>", on_enter)
+        card.bind("<Leave>", on_leave)
+        card.bind("<Button-1>", lambda e: action())
+
+        inner = tk.Frame(card, bg=C_PANEL_BG)
+        inner.pack(fill="x", padx=16, pady=10)
+        inner.bind("<Button-1>", lambda e: action())
+        inner.bind("<Enter>", on_enter)
+        inner.bind("<Leave>", on_leave)
+
+        top_row = tk.Frame(inner, bg=C_PANEL_BG)
+        top_row.pack(fill="x")
+        top_row.bind("<Button-1>", lambda e: action())
+
+        lbl_t = tk.Label(top_row, text=f"[ {title} ]", font=("Consolas", 11, "bold"), fg=color, bg=C_PANEL_BG)
+        lbl_t.pack(side="left")
+        lbl_t.bind("<Button-1>", lambda e: action())
+
+        lbl_sub = tk.Label(inner, text=subtitle, font=("Consolas", 9, "bold"), fg=C_TEXT_WHITE, bg=C_PANEL_BG, anchor="w")
+        lbl_sub.pack(fill="x", pady=(2, 0))
+        lbl_sub.bind("<Button-1>", lambda e: action())
+
+        lbl_det = tk.Label(inner, text=detail, font=("Consolas", 8), fg=C_TEXT_DIM, bg=C_PANEL_BG, anchor="w")
+        lbl_det.pack(fill="x", pady=(2, 0))
+        lbl_det.bind("<Button-1>", lambda e: action())
+
+    def _select_minitoo_flow(self):
+        """Screen 2: MiniToo Pairing & Connection Details."""
+        self._clear_container()
+
+        h_frame = tk.Frame(self.container, bg=C_BG)
+        h_frame.pack(fill="x", padx=24, pady=(20, 10))
+
+        tk.Label(h_frame, text="CONNECT MINITOO", font=("Consolas", 14, "bold"), fg=C_CYAN, bg=C_BG).pack(anchor="w")
+        tk.Label(h_frame, text="Bluetooth Classic / SPP Serial Protocol", font=("Consolas", 9), fg=C_TEXT_DIM, bg=C_BG).pack(anchor="w", pady=(2, 0))
+
+        panel = tk.Frame(self.container, bg=C_PANEL_BG, highlightbackground=C_BORDER, highlightthickness=1)
+        panel.pack(fill="both", expand=True, padx=24, pady=10)
+
+        lbl_probing = tk.Label(panel, text="SCANNING SERIAL PORTS...", font=("Consolas", 10, "bold"), fg=C_AMBER, bg=C_PANEL_BG)
+        lbl_probing.pack(padx=16, pady=(16, 8), anchor="w")
+
+        info_box = tk.Label(panel, text="", font=("Consolas", 9), fg=C_TEXT_WHITE, bg=C_PANEL_BG, justify="left", wraplength=440)
+        info_box.pack(padx=16, pady=4, fill="x")
+
+        btn_box = tk.Frame(self.container, bg=C_BG)
+        btn_box.pack(fill="x", padx=24, pady=(10, 20))
+
+        def run_probe():
+            conn_state, port = detect_minitoo_connection_state(self.config.minitoo_port)
+
+            for w in btn_box.winfo_children():
+                w.destroy()
+
+            if conn_state == "FOUND" and port:
+                lbl_probing.config(text=f"● MINITOO FOUND ON {port}", fg=C_GREEN)
+                info_box.config(
+                    text=f"Successfully detected Divoom MiniToo SPP serial endpoint ({port}).\n"
+                         f"The device is paired in Windows and ready for real-time dashboard streaming."
+                )
+                self.config.target_device = "minitoo"
+                self.config.minitoo_port = port
+                self.config.last_successful_device = "minitoo"
+
+                btn_conn = tk.Button(
+                    btn_box,
+                    text="[ CONNECT & OPEN DASHBOARD ]",
+                    font=("Consolas", 10, "bold"),
+                    bg="#0E2D20",
+                    fg=C_GREEN,
+                    activebackground="#174A34",
+                    bd=1,
+                    relief="solid",
+                    cursor="hand2",
+                    padx=14,
+                    pady=8,
+                    command=self._finish,
+                )
+                btn_conn.pack(fill="x", pady=4)
+
+                btn_rescan = tk.Button(
+                    btn_box,
+                    text="[ RESCAN ]",
+                    font=("Consolas", 9),
+                    bg="#111622",
+                    fg=C_CYAN,
+                    bd=1,
+                    relief="solid",
+                    cursor="hand2",
+                    command=run_probe,
+                )
+                btn_rescan.pack(fill="x", pady=2)
+
+            else:
+                lbl_probing.config(text="○ PAIRING REQUIRED IN WINDOWS", fg=C_CORAL)
+                info_box.config(
+                    text="Pair MiniToo in Windows Bluetooth first.\n\n"
+                         "Windows requires Classic Bluetooth devices to be paired in Windows Settings "
+                         "before standard Serial Port Profile (SPP) COM ports become active.\n\n"
+                         "1. Open Windows Bluetooth Settings.\n"
+                         "2. Select 'Add device' -> 'Bluetooth'.\n"
+                         "3. Choose MiniToo and complete pairing.\n"
+                         "4. Click [ RESCAN ] below."
+                )
+
+                btn_win = tk.Button(
+                    btn_box,
+                    text="[ OPEN WINDOWS BLUETOOTH SETTINGS ]",
+                    font=("Consolas", 10, "bold"),
+                    bg="#221A0F",
+                    fg=C_AMBER,
+                    activebackground="#3D2E1A",
+                    bd=1,
+                    relief="solid",
+                    cursor="hand2",
+                    padx=14,
+                    pady=8,
+                    command=open_windows_bluetooth_settings,
+                )
+                btn_win.pack(fill="x", pady=4)
+
+                btn_rescan = tk.Button(
+                    btn_box,
+                    text="[ RESCAN ]",
+                    font=("Consolas", 9, "bold"),
+                    bg="#102538",
+                    fg=C_CYAN,
+                    bd=1,
+                    relief="solid",
+                    cursor="hand2",
+                    command=run_probe,
+                )
+                btn_rescan.pack(fill="x", pady=2)
+
+                btn_desktop = tk.Button(
+                    btn_box,
+                    text="[ CONTINUE IN DESKTOP-ONLY MODE ]",
+                    font=("Consolas", 9),
+                    bg="#111622",
+                    fg=C_TEXT_MUTED,
+                    bd=1,
+                    relief="solid",
+                    cursor="hand2",
+                    command=self._select_desktop_only,
+                )
+                btn_desktop.pack(fill="x", pady=2)
+
+            btn_back = tk.Button(
+                btn_box,
+                text="← Back to Display Options",
+                font=("Consolas", 9),
+                bg=C_BG,
+                fg=C_TEXT_DIM,
+                bd=0,
+                cursor="hand2",
+                command=self._show_screen_1,
             )
-            lbl.pack(side="right")
-            self.status_labels[key] = lbl
+            btn_back.pack(pady=4)
 
-            if idx < len(rows) - 1:
-                tk.Frame(tbl, bg=C_BORDER, height=1).pack(fill="x", padx=12)
+        self.after(100, run_probe)
 
-        btn_frame = tk.Frame(self, bg=C_BG)
-        btn_frame.pack(fill="x", padx=20, pady=(10, 20))
+    def _select_ditoo_flow(self):
+        """Screen 2: Ditoo BLE Connection Details."""
+        self._clear_container()
 
-        self.btn_open = tk.Button(
-            btn_frame,
-            text="[ OPEN DASHBOARD ]",
+        h_frame = tk.Frame(self.container, bg=C_BG)
+        h_frame.pack(fill="x", padx=24, pady=(20, 10))
+
+        tk.Label(h_frame, text="CONNECT DITOO", font=("Consolas", 14, "bold"), fg=C_PURPLE, bg=C_BG).pack(anchor="w")
+        tk.Label(h_frame, text="Bluetooth Low Energy (BLE) 16x16 Pixel Matrix", font=("Consolas", 9), fg=C_TEXT_DIM, bg=C_BG).pack(anchor="w", pady=(2, 0))
+
+        panel = tk.Frame(self.container, bg=C_PANEL_BG, highlightbackground=C_BORDER, highlightthickness=1)
+        panel.pack(fill="both", expand=True, padx=24, pady=10)
+
+        tk.Label(
+            panel,
+            text="DITOO BLUETOOTH LE DISCOVERY",
             font=("Consolas", 10, "bold"),
-            bg="#102538",
-            fg=C_CYAN,
-            activebackground="#173550",
-            activeforeground=C_CYAN,
+            fg=C_PURPLE,
+            bg=C_PANEL_BG,
+        ).pack(padx=16, pady=(16, 8), anchor="w")
+
+        info_text = (
+            f"Configured Ditoo MAC Address: {self.config.ditoo_mac}\n\n"
+            "Ditoo connects directly using Windows Bluetooth LE GATT protocol. "
+            "No virtual serial COM port is required.\n\n"
+            "• Ensure Ditoo is powered ON.\n"
+            "• Ensure Bluetooth is enabled in Windows.\n"
+            "• AI Desk Dashboard will automatically pair and rotate 16x16 Crypto & Stocks."
+        )
+        tk.Label(panel, text=info_text, font=("Consolas", 9), fg=C_TEXT_WHITE, bg=C_PANEL_BG, justify="left", wraplength=440).pack(padx=16, pady=4, fill="x")
+
+        btn_box = tk.Frame(self.container, bg=C_BG)
+        btn_box.pack(fill="x", padx=24, pady=(10, 20))
+
+        def connect_ditoo():
+            self.config.target_device = "ditoo"
+            self.config.last_successful_device = "ditoo"
+            self._finish()
+
+        tk.Button(
+            btn_box,
+            text="[ CONNECT & OPEN DASHBOARD ]",
+            font=("Consolas", 10, "bold"),
+            bg="#221333",
+            fg=C_PURPLE,
+            activebackground="#3B2058",
             bd=1,
             relief="solid",
             cursor="hand2",
-            padx=16,
+            padx=14,
             pady=8,
-            command=self._finish,
-        )
-        self.btn_open.pack(fill="x")
+            command=connect_ditoo,
+        ).pack(fill="x", pady=4)
 
-    def _update_status(self, key: str, text: str, color: str):
-        if key in self.status_labels:
-            self.status_labels[key].config(text=text, fg=color)
+        tk.Button(
+            btn_box,
+            text="[ OPEN WINDOWS BLUETOOTH SETTINGS ]",
+            font=("Consolas", 9),
+            bg="#111622",
+            fg=C_AMBER,
+            bd=1,
+            relief="solid",
+            cursor="hand2",
+            command=open_windows_bluetooth_settings,
+        ).pack(fill="x", pady=2)
 
-    def _run_probes(self):
-        def probe_worker():
-            # 1. MiniToo Port
-            port = detect_minitoo_port(self.config.minitoo_port)
-            if port:
-                self._update_status("minitoo", f"FOUND ({port})", C_GREEN)
+        tk.Button(
+            btn_box,
+            text="[ CONTINUE IN DESKTOP-ONLY MODE ]",
+            font=("Consolas", 9),
+            bg="#111622",
+            fg=C_TEXT_MUTED,
+            bd=1,
+            relief="solid",
+            cursor="hand2",
+            command=self._select_desktop_only,
+        ).pack(fill="x", pady=2)
+
+        tk.Button(
+            btn_box,
+            text="← Back to Display Options",
+            font=("Consolas", 9),
+            bg=C_BG,
+            fg=C_TEXT_DIM,
+            bd=0,
+            cursor="hand2",
+            command=self._show_screen_1,
+        ).pack(pady=4)
+
+    def _select_auto_detect(self):
+        """Screen 2: Automatic Discovery Flow."""
+        self._clear_container()
+
+        h_frame = tk.Frame(self.container, bg=C_BG)
+        h_frame.pack(fill="x", padx=24, pady=(20, 10))
+
+        tk.Label(h_frame, text="AUTOMATIC HARDWARE DISCOVERY", font=("Consolas", 14, "bold"), fg=C_AMBER, bg=C_BG).pack(anchor="w")
+        tk.Label(h_frame, text="Scanning for connected desk displays...", font=("Consolas", 9), fg=C_TEXT_DIM, bg=C_BG).pack(anchor="w", pady=(2, 0))
+
+        panel = tk.Frame(self.container, bg=C_PANEL_BG, highlightbackground=C_BORDER, highlightthickness=1)
+        panel.pack(fill="both", expand=True, padx=24, pady=10)
+
+        lbl_res = tk.Label(panel, text="SCANNING...", font=("Consolas", 10, "bold"), fg=C_AMBER, bg=C_PANEL_BG)
+        lbl_res.pack(padx=16, pady=(16, 8), anchor="w")
+
+        info_box = tk.Label(panel, text="Probing SPP COM ports and Bluetooth peripherals...", font=("Consolas", 9), fg=C_TEXT_WHITE, bg=C_PANEL_BG, justify="left", wraplength=440)
+        info_box.pack(padx=16, pady=4, fill="x")
+
+        btn_box = tk.Frame(self.container, bg=C_BG)
+        btn_box.pack(fill="x", padx=24, pady=(10, 20))
+
+        def run_auto():
+            conn_state, port = detect_minitoo_connection_state(self.config.minitoo_port)
+            minitoo_found = (conn_state == "FOUND" and port)
+
+            for w in btn_box.winfo_children():
+                w.destroy()
+
+            if minitoo_found:
+                lbl_res.config(text=f"● FOUND MINITOO ({port})", fg=C_GREEN)
+                info_box.config(
+                    text=f"Found paired Divoom MiniToo on {port}.\n"
+                         f"Dashboard will connect to MiniToo and stream real-time telemetry."
+                )
+                self.config.target_device = "minitoo"
+                self.config.minitoo_port = port
+                self.config.last_successful_device = "minitoo"
             else:
-                self._update_status("minitoo", "NOT DETECTED", C_AMBER)
+                lbl_res.config(text="○ NO PHYSICAL DISPLAY PAIRED", fg=C_AMBER)
+                info_box.config(
+                    text="No MiniToo or Ditoo display is currently paired to Windows.\n\n"
+                         "AI Desk Dashboard has safely configured DESKTOP-ONLY mode.\n"
+                         "You can connect hardware anytime from the navigation header."
+                )
+                self.config.target_device = "desktop"
 
-            # 2. Codex
-            home = os.path.expanduser("~")
-            codex_auth = os.path.join(home, ".codex", "auth.json")
-            if os.path.exists(codex_auth):
-                self._update_status("codex", "READY", C_GREEN)
-            else:
-                self._update_status("codex", "NOT CONFIGURED", C_TEXT_DIM)
+            tk.Button(
+                btn_box,
+                text="[ OPEN DASHBOARD ]",
+                font=("Consolas", 10, "bold"),
+                bg="#102538",
+                fg=C_CYAN,
+                activebackground="#173550",
+                bd=1,
+                relief="solid",
+                cursor="hand2",
+                padx=14,
+                pady=8,
+                command=self._finish,
+            ).pack(fill="x", pady=4)
 
-            # 3. Gemini / Antigravity
-            agy_bin = shutil.which("agy") or os.path.exists(os.path.join(home, "AppData", "Local", "agy", "bin", "agy.exe"))
-            if agy_bin:
-                self._update_status("gemini", "READY", C_GREEN)
-            else:
-                self._update_status("gemini", "LOCAL ONLY", C_AMBER)
+            if not minitoo_found:
+                tk.Button(
+                    btn_box,
+                    text="[ OPEN WINDOWS BLUETOOTH SETTINGS ]",
+                    font=("Consolas", 9),
+                    bg="#111622",
+                    fg=C_AMBER,
+                    bd=1,
+                    relief="solid",
+                    cursor="hand2",
+                    command=open_windows_bluetooth_settings,
+                ).pack(fill="x", pady=2)
 
-            # 4. Claude
-            claude_data = claude_usage.read_claude_usage()
-            if claude_data.get("masked_account") and claude_data["masked_account"] != "Not Configured":
-                self._update_status("claude", f"READY ({claude_data['masked_account']})", C_CORAL)
-            else:
-                self._update_status("claude", "NOT CONFIGURED", C_TEXT_DIM)
+            tk.Button(
+                btn_box,
+                text="← Back to Display Options",
+                font=("Consolas", 9),
+                bg=C_BG,
+                fg=C_TEXT_DIM,
+                bd=0,
+                cursor="hand2",
+                command=self._show_screen_1,
+            ).pack(pady=4)
 
-            # 5. Local GPU
-            if shutil.which("nvidia-smi"):
-                try:
-                    out = check_output_hidden(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], text=True, timeout=2.0).strip()
-                    gname = out.split("\n")[0].strip()
-                    for pfx in ("NVIDIA GeForce ", "NVIDIA ", "GeForce "):
-                        if gname.startswith(pfx):
-                            gname = gname[len(pfx):]
-                    self._update_status("gpu", f"ONLINE ({gname[:12]})", C_GREEN)
-                except Exception:
-                    self._update_status("gpu", "ERROR", C_AMBER)
-            else:
-                self._update_status("gpu", "NO NVIDIA GPU", C_TEXT_DIM)
+        self.after(100, run_auto)
 
-            # 6. DGX Spark Host
-            try:
-                out = check_output_hidden(["ssh", "-o", "ConnectTimeout=2", "-o", "BatchMode=yes", self.config.dgx_host, "hostname"], text=True, timeout=2.5).strip()
-                if out:
-                    self._update_status("dgx", "ONLINE", C_GREEN)
-                else:
-                    self._update_status("dgx", "OFFLINE (CACHED)", C_AMBER)
-            except Exception:
-                self._update_status("dgx", "OFFLINE (CACHED)", C_AMBER)
-
-            # 7. Crypto
-            self._update_status("crypto", "5 ASSETS LIVE", C_GOLD)
-
-            # 8. Stocks
-            self._update_status("stocks", "VOLATILITY READY", C_CYAN)
-
-        threading.Thread(target=probe_worker, daemon=True).start()
+    def _select_desktop_only(self):
+        """Configure desktop-only mode immediately."""
+        self.config.target_device = "desktop"
+        self._finish()
 
     def _finish(self):
         self.config.first_run_completed = True
@@ -242,7 +528,261 @@ class FirstRunDialog(tk.Toplevel):
 
 
 # ==============================================================================
+# 1B. COMPACT DEVICE STATUS & HARDWARE PANEL (MILESTONE 15)
+# ==============================================================================
+class DevicePanelDialog(tk.Toplevel):
+    """
+    Compact Device Status and Management panel.
+    Opened by clicking the Device Status Pill in the navigation header.
+    Shows Device, Transport, Status (CONNECTED, CONNECTING, RECONNECTING, PAIRING REQUIRED, NOT FOUND, OFFLINE),
+    Last Seen, RSSI, and actions: Reconnect, Forget Device, Diagnostics, Bluetooth Settings.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Tk,
+        state: Any,
+        config: DashboardConfig,
+        minitoo_controller: Any,
+        ditoo_controller: Any,
+        on_update: Optional[Callable[[], None]] = None,
+    ):
+        super().__init__(parent)
+        self.state = state
+        self.config = config
+        self.minitoo = minitoo_controller
+        self.ditoo = ditoo_controller
+        self.on_update = on_update
+
+        self.title("Device Status & Hardware")
+        self.geometry("440x440")
+        self.resizable(False, False)
+        self.configure(bg=C_BG)
+        self.transient(parent)
+        self.grab_set()
+
+        self.update_idletasks()
+        px = parent.winfo_x() + (parent.winfo_width() - 440) // 2
+        py = parent.winfo_y() + (parent.winfo_height() - 440) // 2
+        self.geometry(f"+{max(40, px)}+{max(30, py)}")
+
+        self._build_ui()
+
+    def _build_ui(self):
+        h_frame = tk.Frame(self, bg=C_BG)
+        h_frame.pack(fill="x", padx=20, pady=(18, 10))
+
+        tk.Label(
+            h_frame,
+            text="DEVICE STATUS & HARDWARE",
+            font=("Consolas", 12, "bold"),
+            fg=C_CYAN,
+            bg=C_BG,
+        ).pack(anchor="w")
+
+        tk.Label(
+            h_frame,
+            text="Real-Time Link & Telemetry Management",
+            font=("Consolas", 8),
+            fg=C_TEXT_DIM,
+            bg=C_BG,
+        ).pack(anchor="w", pady=(2, 0))
+
+        # Status Table Panel
+        tbl = tk.Frame(self, bg=C_PANEL_BG, highlightbackground=C_BORDER, highlightthickness=1)
+        tbl.pack(fill="both", expand=True, padx=20, pady=8)
+
+        target = getattr(self.config, "target_device", "auto")
+        if target == "minitoo":
+            dev_name = "Divoom MiniToo (160x128 LCD)"
+            transport_str = f"Bluetooth Classic SPP ({self.config.minitoo_port})"
+            status_code = getattr(self.state, "minitoo_state", "OFFLINE")
+            last_seen_t = getattr(self.state, "minitoo_last_seen", 0.0)
+            signal_str = getattr(self.state, "minitoo_rssi", "SPP Direct Link")
+        elif target == "ditoo":
+            dev_name = "Divoom Ditoo (16x16 Pixel Matrix)"
+            transport_str = f"Bluetooth Low Energy ({self.config.ditoo_mac})"
+            status_code = getattr(self.state, "ditoo_state", "OFFLINE")
+            last_seen_t = getattr(self.state, "ditoo_last_seen", 0.0)
+            signal_str = getattr(self.state, "ditoo_rssi", "BLE GATT (~-64 dBm)")
+        elif target == "desktop":
+            dev_name = "Desktop Command Center"
+            transport_str = "Monitor Framebuffer (Direct)"
+            status_code = "OFFLINE"
+            last_seen_t = time.time()
+            signal_str = "Localhost"
+        else:
+            dev_name = "Dual Display (MiniToo + Ditoo)"
+            transport_str = "SPP Serial + BLE GATT"
+            status_code = "CONNECTED" if (self.state.minitoo_connected and self.state.ditoo_connected) else "RECONNECTING"
+            last_seen_t = max(getattr(self.state, "minitoo_last_seen", 0.0), getattr(self.state, "ditoo_last_seen", 0.0))
+            signal_str = "Dual Multi-Link"
+
+        # Format Last Seen
+        if last_seen_t > 0:
+            diff = max(0, int(time.time() - last_seen_t))
+            last_seen_str = "Just now" if diff < 5 else f"{diff}s ago"
+        else:
+            last_seen_str = "Never (Offline)"
+
+        # Color mapping for connection state
+        status_colors = {
+            "CONNECTED": C_GREEN,
+            "CONNECTING": C_AMBER,
+            "RECONNECTING": C_AMBER,
+            "PAIRING REQUIRED": C_CORAL,
+            "NOT FOUND": C_RED,
+            "OFFLINE": C_TEXT_DIM,
+        }
+        status_c = status_colors.get(status_code, C_TEXT_MUTED)
+
+        rows = [
+            ("Device", dev_name, C_TEXT_WHITE),
+            ("Transport", transport_str, C_CYAN),
+            ("Status", status_code, status_c),
+            ("Last Seen", last_seen_str, C_TEXT_MUTED),
+            ("Signal / RSSI", signal_str, C_GREEN if status_code == "CONNECTED" else C_TEXT_DIM),
+        ]
+
+        for idx, (label, val, color) in enumerate(rows):
+            rf = tk.Frame(tbl, bg=C_PANEL_BG)
+            rf.pack(fill="x", padx=16, pady=8)
+
+            tk.Label(
+                rf,
+                text=label,
+                font=("Consolas", 9, "bold"),
+                fg=C_TEXT_DIM,
+                bg=C_PANEL_BG,
+                width=14,
+                anchor="w",
+            ).pack(side="left")
+
+            tk.Label(
+                rf,
+                text=val,
+                font=("Consolas", 9, "bold"),
+                fg=color,
+                bg=C_PANEL_BG,
+                anchor="e",
+            ).pack(side="right")
+
+            if idx < len(rows) - 1:
+                tk.Frame(tbl, bg=C_BORDER, height=1).pack(fill="x", padx=12)
+
+        # Action Buttons
+        btn_box = tk.Frame(self, bg=C_BG)
+        btn_box.pack(fill="x", padx=20, pady=(10, 16))
+
+        row1 = tk.Frame(btn_box, bg=C_BG)
+        row1.pack(fill="x", pady=2)
+
+        tk.Button(
+            row1,
+            text="[ ⟳ RECONNECT ]",
+            font=("Consolas", 9, "bold"),
+            bg="#102538",
+            fg=C_CYAN,
+            bd=1,
+            relief="solid",
+            cursor="hand2",
+            padx=10,
+            pady=6,
+            command=self._on_reconnect,
+        ).pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        tk.Button(
+            row1,
+            text="[ ✕ FORGET DEVICE ]",
+            font=("Consolas", 9),
+            bg="#2A1717",
+            fg=C_RED,
+            bd=1,
+            relief="solid",
+            cursor="hand2",
+            padx=10,
+            pady=6,
+            command=self._on_forget_device,
+        ).pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        row2 = tk.Frame(btn_box, bg=C_BG)
+        row2.pack(fill="x", pady=2)
+
+        tk.Button(
+            row2,
+            text="[ 📊 DIAGNOSTICS ]",
+            font=("Consolas", 9),
+            bg="#111622",
+            fg=C_PURPLE,
+            bd=1,
+            relief="solid",
+            cursor="hand2",
+            padx=10,
+            pady=6,
+            command=self._on_diagnostics,
+        ).pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        tk.Button(
+            row2,
+            text="[ ⚙ BT SETTINGS ]",
+            font=("Consolas", 9),
+            bg="#111622",
+            fg=C_AMBER,
+            bd=1,
+            relief="solid",
+            cursor="hand2",
+            padx=10,
+            pady=6,
+            command=open_windows_bluetooth_settings,
+        ).pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        tk.Button(
+            btn_box,
+            text="[ CLOSE ]",
+            font=("Consolas", 9),
+            bg="#0E131E",
+            fg=C_TEXT_DIM,
+            bd=1,
+            relief="solid",
+            cursor="hand2",
+            pady=5,
+            command=self.destroy,
+        ).pack(fill="x", pady=(4, 0))
+
+    def _on_reconnect(self):
+        if hasattr(self.minitoo, "trigger_reconnect"):
+            self.minitoo.trigger_reconnect()
+        self.destroy()
+        if self.on_update:
+            self.on_update()
+
+    def _on_forget_device(self):
+        self.config.target_device = "desktop"
+        self.config.last_successful_device = None
+        self.config.save()
+        self.destroy()
+        if self.on_update:
+            self.on_update()
+
+    def _on_diagnostics(self):
+        self.destroy()
+        report = ""
+        if hasattr(self.minitoo, "format_diagnostics_report"):
+            report = self.minitoo.format_diagnostics_report()
+        # Fallback or display report
+        d_win = tk.Toplevel(self.master)
+        d_win.title("Bluetooth & Transport Diagnostics")
+        d_win.geometry("560x420")
+        d_win.configure(bg=C_BG)
+        txt = tk.Text(d_win, bg=C_PANEL_BG, fg=C_CYAN, font=("Consolas", 9), relief="solid", bd=1)
+        txt.pack(fill="both", expand=True, padx=16, pady=16)
+        txt.insert("1.0", report or "No diagnostics currently recorded.")
+        txt.config(state="disabled")
+
+
+# ==============================================================================
 # 2. CLAUDE MULTI-ACCOUNT DIAGNOSTICS MODAL
+
 # ==============================================================================
 class ClaudeAccountsDialog(tk.Toplevel):
     """

@@ -7,8 +7,11 @@ and safely probes using read-only SPP frames (0xBD 0x13 Display Channel query).
 """
 from __future__ import annotations
 
+import os
+import sys
 import time
 from typing import List, Dict, Tuple, Optional
+
 
 try:
     import serial
@@ -129,3 +132,34 @@ def detect_minitoo_port(preferred_port: Optional[str] = "AUTO") -> Optional[str]
         return scored[0][1]
 
     return None
+
+
+def open_windows_bluetooth_settings() -> bool:
+    """Launch Windows Bluetooth Settings screen directly."""
+    try:
+        os.system("start ms-settings:bluetooth")
+        return True
+    except Exception:
+        return False
+
+
+def detect_minitoo_connection_state(preferred_port: Optional[str] = "AUTO") -> Tuple[str, Optional[str]]:
+    """
+    Evaluate MiniToo hardware connection state:
+    Returns (status, port_or_detail):
+    - ("FOUND", port): device verified or strong port detected
+    - ("PAIRING REQUIRED", None): Bluetooth exists but no MiniToo SPP service paired
+    - ("NOT FOUND", None): No serial or Bluetooth devices available
+    """
+    port = detect_minitoo_port(preferred_port)
+    if port:
+        return ("FOUND", port)
+
+    if serial is not None:
+        all_ports = list(serial.tools.list_ports.comports())
+        has_bt = any("BTHENUM" in (p.hwid or "").upper() for p in all_ports)
+        if has_bt:
+            return ("PAIRING REQUIRED", None)
+
+    return ("NOT FOUND", None)
+

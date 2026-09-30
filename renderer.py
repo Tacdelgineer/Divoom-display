@@ -146,9 +146,12 @@ def render_dashboard_page(
     elif p_id in ("btc", "eth", "sol", "doge", "pepe", "crypto"):
         c_title = (247, 147, 26)      # Bitcoin / Crypto gold
         c_badge_border = (120, 75, 15)
-    elif p_id in ("stocks_volatile", "stocks"):
+    elif p_id in ("stocks_market_cap", "stocks_volatile", "stocks"):
         c_title = (0, 229, 255)       # Cyan stocks scanner
         c_badge_border = (0, 90, 110)
+    elif p_id == "signals":
+        c_title = (56, 239, 125)      # Emerald prediction markets
+        c_badge_border = (30, 90, 60)
     elif p_id == "ai_activity":
         c_title = (185, 140, 255)     # Agent purple
         c_badge_border = (70, 45, 110)
@@ -175,8 +178,10 @@ def render_dashboard_page(
         b_text = (page.footer_left or "ONLINE").upper()
     elif p_id == "coding":
         b_text = (page.secondary_metric.value if page.secondary_metric else "MAIN").upper()
-    elif p_id in ("btc", "eth", "sol", "doge", "pepe", "crypto", "stocks_volatile", "stocks"):
+    elif p_id in ("btc", "eth", "sol", "doge", "pepe", "crypto", "stocks_market_cap", "stocks_volatile", "stocks"):
         b_text = (page.badge or "").upper()
+    elif p_id == "signals":
+        b_text = (page.badge or "ODDS").upper()
     elif p_id in ("ai_activity", "services"):
         b_text = page.badge.upper()
     else:
@@ -380,8 +385,8 @@ def render_dashboard_page(
             if idx < 4:
                 draw.line([(8, ry + 14), (120, ry + 14)], fill=(18, 26, 40), width=1)
 
-    # PATH E3: VOLATILE STOCKS SCANNER (TOP 5 ON 128px DISPLAY)
-    elif p_id in ("stocks_volatile", "stocks"):
+    # PATH E3: US EQUITIES (TOP 5 ON 128px DISPLAY)
+    elif p_id in ("stocks_market_cap", "stocks_volatile", "stocks"):
         quotes = page.stocks_data or []
         for idx, q in enumerate(quotes[:5]):
             ry = 26 + idx * 15
@@ -392,12 +397,53 @@ def render_dashboard_page(
             p_str = f"${q.price:.1f}" if q.price < 1000 else f"${q.price:.0f}"
             draw.text((54, ry), p_str, fill=(190, 205, 220), font=fonts["reset"])
             
-            vol_str = f"{q.volatility_pct:.1f}%"
-            vbox = fonts["label"].getbbox(vol_str)
-            vw = vbox[2] - vbox[0]
-            draw.text((120 - vw, ry), vol_str, fill=(0, 229, 255), font=fonts["label"])
+            if p_id == "stocks_market_cap" or q.market_cap > 0:
+                right_str = q.formatted_market_cap.replace("$", "").replace(" ", "")
+                r_col = (245, 175, 50)
+            else:
+                right_str = f"{q.volatility_pct:.1f}%"
+                r_col = (0, 229, 255)
+
+            rbox = fonts["label"].getbbox(right_str)
+            rw = rbox[2] - rbox[0]
+            draw.text((120 - rw, ry), right_str, fill=r_col, font=fonts["label"])
             if idx < 4:
                 draw.line([(8, ry + 14), (120, ry + 14)], fill=(18, 26, 40), width=1)
+
+    # PATH E4: SIGNALS / POLYMARKET PREDICTION ODDS
+    elif p_id == "signals":
+        signals = page.signals_data or []
+        if signals:
+            sig = signals[0]
+            q_short = sig.question
+            if len(q_short) > 18:
+                q_short = q_short[:17] + "…"
+            draw.text((8, 26), q_short.upper(), fill=(210, 225, 245), font=fonts["label"])
+
+            prob_pct = int(round(sig.yes_probability * 100))
+            prob_str = f"{prob_pct}%"
+            draw.text((8, 40), prob_str, fill=(56, 239, 125), font=fonts["large"])
+
+            delta = sig.change_24h_pts
+            d_arrow = "▲" if delta >= 0 else "▼"
+            d_col = (50, 230, 140) if delta >= 0 else (245, 80, 80)
+            d_str = f"{d_arrow} {abs(delta):.1f} pts"
+            draw.text((62, 44), d_str, fill=d_col, font=fonts["value"])
+
+            draw.line([(8, 64), (120, 64)], fill=(20, 32, 48), width=1)
+
+            draw.text((8, 70), f"VOL: {sig.formatted_volume}", fill=(130, 145, 170), font=fonts["reset"])
+            draw.text((8, 84), f"LIQ: {sig.formatted_liquidity}", fill=(130, 145, 170), font=fonts["reset"])
+
+            if len(signals) > 1:
+                sig2 = signals[1]
+                p2 = int(round(sig2.yes_probability * 100))
+                draw.text((8, 100), f"2. {sig2.question[:11]}…", fill=(100, 120, 145), font=fonts["reset"])
+                bbox2 = fonts["reset"].getbbox(f"{p2}%")
+                w2 = bbox2[2] - bbox2[0]
+                draw.text((120 - w2, 100), f"{p2}%", fill=(0, 229, 255), font=fonts["reset"])
+        else:
+            draw.text((18, 50), "NO SIGNAL DATA", fill=(120, 135, 155), font=fonts["label"])
 
     # PATH F: AI ACTIVITY PAGE (CODEX, CLAUDE, GEMINI REAL-TIME STATUS)
     elif p_id == "ai_activity":

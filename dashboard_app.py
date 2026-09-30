@@ -41,15 +41,17 @@ from config import (
     SECTION_AI_USAGE,
     SECTION_SYSTEM,
     SECTION_STOCKS,
+    SECTION_SIGNALS,
     ALL_PRESETS,
     PRESET_ALL,
     PRESET_AI,
     PRESET_CRYPTO,
     PRESET_STOCKS,
+    PRESET_SIGNALS,
     PRESET_MARKETS,
     PRESET_SYSTEM,
 )
-from ui_components import FirstRunDialog, SettingsDialog, ClaudeAccountsDialog
+from ui_components import FirstRunDialog, SettingsDialog, ClaudeAccountsDialog, DevicePanelDialog
 from engine import (
     DashboardState,
     DataEngine,
@@ -57,7 +59,7 @@ from engine import (
     DitooController,
     WindowsAutostart,
 )
-from models import PageData, MetricItem
+from models import PageData, MetricItem, StockQuote, PredictionMarketSignal, NewsHeadline
 from src.renderers.ditoo_16 import (
     Crypto16Renderer,
     Stock16Renderer,
@@ -143,7 +145,9 @@ CARD_COLORS = {
     "services": C_GREEN,
     "coding": C_PURPLE,
     "ai_activity": C_PURPLE,
+    "stocks_market_cap": C_ACTIVE_CYAN,
     "stocks_volatile": C_ACTIVE_CYAN,
+    "signals": "#38EF7D",
 }
 
 SECTION_COLORS = {
@@ -151,6 +155,7 @@ SECTION_COLORS = {
     SECTION_AI_USAGE: C_CORAL,
     SECTION_SYSTEM: C_GREEN,
     SECTION_STOCKS: C_ACTIVE_CYAN,
+    SECTION_SIGNALS: "#38EF7D",
 }
 
 
@@ -218,6 +223,7 @@ class DesktopDashboardApp:
         self.ditoo_btn_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self.ditoo_crypto_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self.ditoo_stock_bounds: Dict[str, Tuple[int, int, int, int]] = {}
+        self.stock_mode_bounds: Dict[str, Tuple[int, int, int, int]] = {}
         self._ditoo_photo = None
         self._minitoo_photo = None
         self._last_win_size: Optional[Tuple[int, int]] = None
@@ -246,14 +252,15 @@ class DesktopDashboardApp:
         self.canvas.bind("<MouseWheel>", self._on_mousewheel)
         self.root.bind("<Configure>", self._on_window_configure)
 
-        # 4. Keyboard Shortcuts (Milestone 14)
+        # 4. Keyboard Shortcuts (Milestone 14/15)
         self.root.bind("<Control-comma>", lambda e: self._open_settings())
         self.root.bind("<Control-p>", lambda e: self._open_settings())
         self.root.bind("1", lambda e: self._apply_preset_shortcut(PRESET_ALL))
         self.root.bind("2", lambda e: self._apply_preset_shortcut(PRESET_AI))
         self.root.bind("3", lambda e: self._apply_preset_shortcut(PRESET_CRYPTO))
         self.root.bind("4", lambda e: self._apply_preset_shortcut(PRESET_STOCKS))
-        self.root.bind("5", lambda e: self._apply_preset_shortcut(PRESET_SYSTEM))
+        self.root.bind("5", lambda e: self._apply_preset_shortcut(PRESET_SIGNALS))
+        self.root.bind("6", lambda e: self._apply_preset_shortcut(PRESET_SYSTEM))
         self.root.bind("<F11>", lambda e: self._toggle_fullscreen())
         self.root.bind("<Escape>", lambda e: self._on_escape())
 
@@ -424,7 +431,7 @@ class DesktopDashboardApp:
         self.lbl_preset.pack(side="left", padx=(0, ui_scale.s(6)))
 
         self.preset_btn_widgets: Dict[str, tk.Button] = {}
-        for p_name in ["ALL", "AI", "CRYPTO", "STOCKS", "SYSTEM"]:
+        for p_name in ["ALL", "AI", "CRYPTO", "STOCKS", "SIGNALS", "SYSTEM"]:
             b = self._create_retro_button(
                 self.frame_minitoo_nav,
                 text=p_name,
@@ -540,8 +547,10 @@ class DesktopDashboardApp:
             bd=1,
             highlightthickness=1,
             highlightbackground="#1B4D36",
+            cursor="hand2",
         )
         self.lbl_status_pill.pack(side="right", padx=ui_scale.s(10), ipady=ui_scale.s(3), ipadx=ui_scale.s(8))
+        self.lbl_status_pill.bind("<Button-1>", lambda e: self._open_device_panel())
 
         # 2. Creator Capture Navigation Bar
         self.nav_creator_frame = tk.Frame(self.header_frame, bg=C_HEADER_BG)
@@ -598,7 +607,7 @@ class DesktopDashboardApp:
         self.lbl_cr_preset.pack(side="left", padx=(ui_scale.s(12), ui_scale.s(6)))
 
         self.creator_preset_btn_widgets: Dict[str, tk.Button] = {}
-        for p_name in ["ALL", "AI", "CRYPTO", "STOCKS", "SYSTEM"]:
+        for p_name in ["ALL", "AI", "CRYPTO", "STOCKS", "SIGNALS", "SYSTEM"]:
             b = self._create_retro_button(
                 self.nav_creator_frame,
                 text=p_name,
@@ -664,6 +673,7 @@ class DesktopDashboardApp:
             "minitoo": "🖥 MiniToo ▼",
             "ditoo": "👾 Ditoo ▼",
             "preview": "👁 Dual ▼",
+            "desktop": "💻 Desktop ▼",
         }
         self.btn_device.config(text=dev_labels.get(target, "🖥 MiniToo ▼"))
 
@@ -737,28 +747,46 @@ class DesktopDashboardApp:
             highlightbackground=auto_border,
         )
 
-        if target == "ditoo":
-            conn = self.state.ditoo_connected
-            status_str = self.state.ditoo_status_text
-            pill_color = C_GREEN if conn else (C_AMBER if "RECONNECTING" in status_str else C_RED)
-            pill_bg = "#0D261B" if conn else ("#261D0D" if "RECONNECTING" in status_str else "#2A1111")
-            pill_border = "#1B4D36" if conn else ("#4D361B" if "RECONNECTING" in status_str else "#4D1B1B")
-            pill_text = f"● {status_str[:22]}"
-        elif target == "preview":
-            conn = self.state.ditoo_connected or self.state.minitoo_connected
-            d_st = "DITOO ● " if self.state.ditoo_connected else "DITOO ○ "
-            m_st = "MINITOO ●" if self.state.minitoo_connected else "MINITOO ○"
-            pill_text = f"DUAL: {d_st}| {m_st}"
-            pill_color = C_ACTIVE_CYAN if conn else C_AMBER
+        if target == "desktop":
+            pill_text = "● DESKTOP DASHBOARD"
+            pill_color = C_ACTIVE_CYAN
             pill_bg = "#09222E"
             pill_border = "#13495F"
-        else:
-            conn = self.state.minitoo_connected
-            status_str = self.state.minitoo_status_text
-            pill_color = C_GREEN if conn else C_AMBER
-            pill_bg = "#0D261B" if conn else "#261D0D"
-            pill_border = "#1B4D36" if conn else "#4D361B"
-            pill_text = f"● {status_str[:22]}"
+        elif target == "ditoo":
+            st = getattr(self.state, "ditoo_state", "CONNECTED" if self.state.ditoo_connected else "NOT FOUND").upper()
+            if "CONNECTED" in st:
+                pill_color, pill_bg, pill_border = C_GREEN, "#0D261B", "#1B4D36"
+            elif "CONNECTING" in st or "RECONNECT" in st:
+                pill_color, pill_bg, pill_border = C_ACTIVE_CYAN, "#09222E", "#13495F"
+            elif "PAIR" in st:
+                pill_color, pill_bg, pill_border = C_AMBER, "#2B1B10", "#5C3214"
+            elif "NOT FOUND" in st or "OFFLINE" in st:
+                pill_color, pill_bg, pill_border = C_RED, "#2A1111", "#4D1B1B"
+            else:
+                pill_color, pill_bg, pill_border = C_TEXT_MUTED, "#181D26", "#2A3445"
+            pill_text = f"● DITOO: {st[:18]}"
+        elif target == "preview":
+            m_st = getattr(self.state, "minitoo_state", "CONNECTED" if self.state.minitoo_connected else "OFFLINE").upper()
+            d_st = getattr(self.state, "ditoo_state", "CONNECTED" if self.state.ditoo_connected else "OFFLINE").upper()
+            m_sym = "●" if "CONNECTED" in m_st else "○"
+            d_sym = "●" if "CONNECTED" in d_st else "○"
+            pill_text = f"DUAL: MINI {m_sym} | DITOO {d_sym}"
+            pill_color = C_ACTIVE_CYAN if (m_sym == "●" or d_sym == "●") else C_AMBER
+            pill_bg = "#09222E"
+            pill_border = "#13495F"
+        else: # minitoo
+            st = getattr(self.state, "minitoo_state", "CONNECTED" if self.state.minitoo_connected else "NOT FOUND").upper()
+            if "CONNECTED" in st:
+                pill_color, pill_bg, pill_border = C_GREEN, "#0D261B", "#1B4D36"
+            elif "CONNECTING" in st or "RECONNECT" in st:
+                pill_color, pill_bg, pill_border = C_ACTIVE_CYAN, "#09222E", "#13495F"
+            elif "PAIR" in st:
+                pill_color, pill_bg, pill_border = C_AMBER, "#2B1B10", "#5C3214"
+            elif "NOT FOUND" in st or "OFFLINE" in st:
+                pill_color, pill_bg, pill_border = C_RED, "#2A1111", "#4D1B1B"
+            else:
+                pill_color, pill_bg, pill_border = C_TEXT_MUTED, "#181D26", "#2A3445"
+            pill_text = f"● MINITOO: {st[:18]}"
 
         self.lbl_status_pill.config(
             text=pill_text,
@@ -766,6 +794,20 @@ class DesktopDashboardApp:
             bg=pill_bg,
             highlightbackground=pill_border,
         )
+
+    def _open_device_panel(self):
+        DevicePanelDialog(
+            parent=self.root,
+            state=self.state,
+            config=self.config,
+            minitoo_controller=self.minitoo,
+            ditoo_controller=self.ditoo,
+            on_update=self._refresh_device_ui,
+        )
+
+    def _refresh_device_ui(self):
+        self._update_header_widgets()
+        self._render_gui()
 
     def _on_device_btn_clicked(self):
         menu = tk.Menu(
@@ -780,6 +822,7 @@ class DesktopDashboardApp:
         menu.add_command(label="🖥 MiniToo (160x128 LCD)", command=lambda: self._select_device("minitoo"))
         menu.add_command(label="👾 Ditoo (16x16 Matrix)", command=lambda: self._select_device("ditoo"))
         menu.add_command(label="👁 Dual Preview (Both Displays)", command=lambda: self._select_device("preview"))
+        menu.add_command(label="💻 Desktop Dashboard Only", command=lambda: self._select_device("desktop"))
         try:
             root_x = self.btn_device.winfo_rootx()
             root_y = self.btn_device.winfo_rooty() + self.btn_device.winfo_height() + 2
@@ -858,6 +901,7 @@ class DesktopDashboardApp:
         if not has_hand:
             clickable_bounds = [
                 self.focus_btn_bounds,
+                self.stock_mode_bounds,
                 self.ditoo_btn_bounds,
                 self.ditoo_crypto_bounds,
                 self.ditoo_stock_bounds,
@@ -879,7 +923,15 @@ class DesktopDashboardApp:
         canvas_x = self.canvas.canvasx(event.x)
         canvas_y = self.canvas.canvasy(event.y)
 
-        # 1. Focus Mode buttons on canvas
+        # 1. Stock Mode Toggle Buttons [ MARKET CAP ] [ VOLATILE ]
+        for mode_key, (mx1, my1, mx2, my2) in self.stock_mode_bounds.items():
+            if mx1 <= canvas_x <= mx2 and my1 <= canvas_y <= my2:
+                self.config.stock_mode = mode_key
+                self.config.save()
+                self._render_gui()
+                return
+
+        # 2. Focus Mode buttons on canvas
         if "back_all" in self.focus_btn_bounds:
             bx1, by1, bx2, by2 = self.focus_btn_bounds["back_all"]
             if bx1 <= canvas_x <= bx2 and by1 <= canvas_y <= by2:
@@ -1052,6 +1104,7 @@ class DesktopDashboardApp:
         self.canvas.delete("all")
         self.card_bounds.clear()
         self.focus_btn_bounds.clear()
+        self.stock_mode_bounds.clear()
         self.ditoo_btn_bounds.clear()
         self.ditoo_crypto_bounds.clear()
         self.ditoo_stock_bounds.clear()
@@ -1128,10 +1181,32 @@ class DesktopDashboardApp:
                 return curr_y
 
             elif preset == PRESET_STOCKS:
-                self.card_bounds["stocks_volatile"] = (cx1, curr_y, cx2, curr_y + ui_scale.s(320))
-                page_data = self.state.get_page("stocks_volatile")
-                self._draw_stocks_volatile_card(page_data, cx1, curr_y, cx2, curr_y + ui_scale.s(320), False, False, True)
-                return curr_y + ui_scale.s(320) + ui_scale.gap
+                page_data = self.state.get_page("stocks_market_cap")
+                quotes = page_data.stocks_data if page_data else []
+                if not quotes:
+                    from market_provider import get_stocks
+                    quotes = get_stocks(mode="market_cap")
+                card_h = ui_scale.s(145)
+                for q in quotes[:5]:
+                    c_key = f"stock_{q.symbol}"
+                    self.card_bounds[c_key] = (cx1, curr_y, cx2, curr_y + card_h)
+                    self._draw_stock_card(q, cx1, curr_y, cx2, curr_y + card_h, False, False, True, "market_cap")
+                    curr_y += card_h + ui_scale.gap
+                return curr_y
+
+            elif preset == PRESET_SIGNALS:
+                page_data = self.state.get_page("signals")
+                signals = page_data.signals_data if page_data else []
+                if not signals:
+                    from signals_provider import get_prediction_signals
+                    signals = get_prediction_signals()
+                card_h = ui_scale.s(185)
+                for sig in signals[:3]:
+                    c_key = f"signal_{sig.event_id}"
+                    self.card_bounds[c_key] = (cx1, curr_y, cx2, curr_y + card_h)
+                    self._draw_signal_card(sig, cx1, curr_y, cx2, curr_y + card_h, False)
+                    curr_y += card_h + ui_scale.gap
+                return curr_y
 
             elif preset == PRESET_SYSTEM:
                 sys_cards = ["local_pc", "dgx_spark", "services"]
@@ -1211,6 +1286,8 @@ class DesktopDashboardApp:
                 return self._draw_focus_stocks(curr_y, cur_w)
             elif sec_id == SECTION_SYSTEM:
                 return self._draw_focus_system(curr_y, cur_w)
+            elif sec_id == SECTION_SIGNALS:
+                return self._draw_focus_signals(curr_y, cur_w)
 
         # Standard Multi-Section View with Responsive Card Reflow
         margin = ui_scale.grid_margin
@@ -1223,6 +1300,16 @@ class DesktopDashboardApp:
 
             sec_title = SECTION_TITLES.get(sec_id, sec_id.upper())
             sec_color = SECTION_COLORS.get(sec_id, C_TEXT_MUTED)
+
+            # Special layout for stocks: rich 10-card market cap / volatility grid
+            if sec_id == SECTION_STOCKS:
+                curr_y = self._draw_stocks_section(curr_y, cur_w)
+                continue
+
+            # Special layout for signals: Polymarket prediction market & headlines
+            if sec_id == SECTION_SIGNALS:
+                curr_y = self._draw_signals_section(curr_y, cur_w)
+                continue
 
             # Generous Breathing Room above Section Header
             curr_y += ui_scale.s(14)
@@ -1276,24 +1363,6 @@ class DesktopDashboardApp:
                     anchor="w",
                 )
                 curr_y += ui_scale.s(32)
-                continue
-
-            # Special layout for stocks scanner card: wide responsive card
-            if sec_id == SECTION_STOCKS and "stocks_volatile" in cards:
-                sx1 = margin
-                sy1 = curr_y
-                sx2 = cur_w - margin
-                stock_h = ui_scale.s(150)
-                sy2 = sy1 + stock_h
-
-                self.card_bounds["stocks_volatile"] = (sx1, sy1, sx2, sy2)
-                page_data = self.state.get_page("stocks_volatile")
-                is_active = ("stocks_volatile" == self.state.minitoo_active_page)
-                is_hover = ("stocks_volatile" == self.hovered_card)
-                is_enabled = self.config.enabled_cards.get("stocks_volatile", True)
-
-                self._draw_stocks_volatile_card(page_data, sx1, sy1, sx2, sy2, is_active, is_hover, is_enabled)
-                curr_y = sy2 + gap
                 continue
 
             # Dynamic responsive grid calculation:
@@ -1538,62 +1607,77 @@ class DesktopDashboardApp:
 
     def _draw_focus_stocks(self, curr_y: int, cur_w: int) -> int:
         margin = ui_scale.grid_margin
-        sx1 = margin
-        sy1 = curr_y
-        sx2 = cur_w - margin
-        table_h = ui_scale.s(310)
-        sy2 = sy1 + table_h
+        gap = ui_scale.gap
+        avail_w = cur_w - 2 * margin
+        mode = getattr(self.config, "stock_mode", "market_cap")
 
-        self.card_bounds["stocks_volatile"] = (sx1, sy1, sx2, sy2)
-        page_data = self.state.get_page("stocks_volatile")
-        is_active = ("stocks_volatile" == self.state.minitoo_active_page)
-        is_hover = ("stocks_volatile" == self.hovered_card)
-
-        border_c = C_ACTIVE_CYAN if is_active else (C_CARD_HOVER if is_hover else C_CARD_BORDER)
-        bg_c = "#121A2B" if is_active else C_CARD_BG
-        self.canvas.create_rectangle(sx1, sy1, sx2, sy2, fill=bg_c, outline=border_c, width=2 if is_active else 1)
-
-        self.canvas.create_text(sx1 + ui_scale.s(16), sy1 + ui_scale.s(20), text="TOP 10 MOST VOLATILE US STOCKS TODAY", font=ui_scale.f_card_title, fill=C_ACTIVE_CYAN, anchor="w")
-
-        mkt_badge = page_data.badge if page_data else "REGULAR"
-        b_c = C_GREEN if "OPEN" in mkt_badge or "REG" in mkt_badge else C_AMBER
-        tag_w = ui_scale.s(82)
-        self.canvas.create_rectangle(sx2 - tag_w - ui_scale.s(14), sy1 + ui_scale.s(10), sx2 - ui_scale.s(14), sy1 + ui_scale.s(28), fill="#131926", outline="#202A3C")
-        self.canvas.create_text(sx2 - tag_w // 2 - ui_scale.s(14), sy1 + ui_scale.s(19), text=mkt_badge, font=ui_scale.f_badge, fill=b_c, anchor="center")
-
+        page_id = "stocks_volatile" if mode == "volatile" else "stocks_market_cap"
+        page_data = self.state.get_page(page_id)
         quotes = page_data.stocks_data if page_data else []
         if not quotes:
-            self.canvas.create_text((sx1 + sx2) // 2, (sy1 + sy2) // 2, text="COLLECTING MARKET VOLATILITY...", font=ui_scale.f_secondary_metric, fill=C_TEXT_DIM, anchor="center")
-            return sy2 + ui_scale.gap
+            from market_provider import get_stocks
+            quotes = get_stocks(mode=mode)
 
-        mid_x = (sx1 + sx2) // 2
-        row_h = ui_scale.s(25)
+        if avail_w >= 1350:
+            num_cols = 5
+        elif avail_w >= 1050:
+            num_cols = 4
+        elif avail_w >= 750:
+            num_cols = 3
+        elif avail_w >= 500:
+            num_cols = 2
+        else:
+            num_cols = 1
 
-        # Left Column: Ranks 1 to 5
-        for idx, q in enumerate(quotes[:5]):
-            ry = sy1 + ui_scale.s(48) + idx * row_h
-            chg_c = C_GREEN if q.change_pct >= 0 else C_RED
-            self.canvas.create_text(sx1 + ui_scale.s(16), ry, text=f"#{idx+1}", font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="w")
-            self.canvas.create_text(sx1 + ui_scale.s(44), ry, text=q.symbol, font=ui_scale.f_secondary_metric, fill=C_TEXT_WHITE, anchor="w")
-            self.canvas.create_text(sx1 + ui_scale.s(110), ry, text=f"${q.price:,.2f}", font=ui_scale.f_body, fill=C_TEXT_MUTED, anchor="w")
-            self.canvas.create_text(sx1 + ui_scale.s(210), ry, text=f"{q.change_pct:+.1f}%", font=ui_scale.f_secondary_metric, fill=chg_c, anchor="e")
-            self.canvas.create_text(mid_x - ui_scale.s(20), ry, text=f"VOL {q.volatility_pct:.1f}%", font=ui_scale.f_secondary_metric, fill=C_ACTIVE_CYAN, anchor="e")
+        card_w = (avail_w - (num_cols - 1) * gap) // num_cols
+        card_h = ui_scale.s(165)
 
-        self.canvas.create_line(mid_x, sy1 + ui_scale.s(40), mid_x, sy2 - ui_scale.s(30), fill="#1A2436", width=1)
+        for idx, q in enumerate(quotes[:10]):
+            col = idx % num_cols
+            row = idx // num_cols
+            cx1 = margin + col * (card_w + gap)
+            cy1 = curr_y + row * (card_h + gap)
+            cx2 = cx1 + card_w
+            cy2 = cy1 + card_h
 
-        # Right Column: Ranks 6 to 10
-        for idx, q in enumerate(quotes[5:10]):
-            ry = sy1 + ui_scale.s(48) + idx * row_h
-            chg_c = C_GREEN if q.change_pct >= 0 else C_RED
-            self.canvas.create_text(mid_x + ui_scale.s(20), ry, text=f"#{idx+6}", font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="w")
-            self.canvas.create_text(mid_x + ui_scale.s(48), ry, text=q.symbol, font=ui_scale.f_secondary_metric, fill=C_TEXT_WHITE, anchor="w")
-            self.canvas.create_text(mid_x + ui_scale.s(114), ry, text=f"${q.price:,.2f}", font=ui_scale.f_body, fill=C_TEXT_MUTED, anchor="w")
-            self.canvas.create_text(mid_x + ui_scale.s(214), ry, text=f"{q.change_pct:+.1f}%", font=ui_scale.f_secondary_metric, fill=chg_c, anchor="e")
-            self.canvas.create_text(sx2 - ui_scale.s(20), ry, text=f"VOL {q.volatility_pct:.1f}%", font=ui_scale.f_secondary_metric, fill=C_ACTIVE_CYAN, anchor="e")
+            c_key = f"stock_{q.symbol}"
+            self.card_bounds[c_key] = (cx1, cy1, cx2, cy2)
+            is_hover = (c_key == self.hovered_card)
+            self._draw_stock_card(q, cx1, cy1, cx2, cy2, is_hover=is_hover, is_active=False, is_enabled=True, mode=mode)
 
-        footer_str = "METRIC: Intraday Range % = (High - Low) / PrevClose · YahooFinance High-Frequency Poller"
-        self.canvas.create_text(sx1 + ui_scale.s(16), sy2 - ui_scale.s(14), text=footer_str, font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="w")
-        return sy2 + ui_scale.gap
+        total_rows = (min(len(quotes), 10) + num_cols - 1) // num_cols
+        return curr_y + total_rows * (card_h + gap) + ui_scale.s(10)
+
+    def _draw_focus_signals(self, curr_y: int, cur_w: int) -> int:
+        margin = ui_scale.grid_margin
+        gap = ui_scale.gap
+        avail_w = cur_w - 2 * margin
+
+        page_data = self.state.get_page("signals")
+        signals = page_data.signals_data if page_data else []
+        if not signals:
+            from signals_provider import get_prediction_signals
+            signals = get_prediction_signals()
+
+        num_cols = 2 if avail_w >= 900 else 1
+        card_w = (avail_w - (num_cols - 1) * gap) // num_cols
+        card_h = ui_scale.s(215)
+
+        for idx, sig in enumerate(signals[:6]):
+            col = idx % num_cols
+            row = idx // num_cols
+            cx1 = margin + col * (card_w + gap)
+            cy1 = curr_y + row * (card_h + gap)
+            cx2 = cx1 + card_w
+            cy2 = cy1 + card_h
+
+            c_key = f"signal_{sig.event_id}"
+            self.card_bounds[c_key] = (cx1, cy1, cx2, cy2)
+            is_hover = (c_key == self.hovered_card)
+            self._draw_signal_card(sig, cx1, cy1, cx2, cy2, is_hover=is_hover)
+
+        total_rows = (min(len(signals), 6) + num_cols - 1) // num_cols
+        return curr_y + total_rows * (card_h + gap) + ui_scale.s(10)
 
     def _draw_focus_system(self, curr_y: int, cur_w: int) -> int:
         cards = [c for c in ["local_pc", "dgx_spark", "services", "coding"] if self.config.enabled_cards.get(c, True)]
@@ -2188,59 +2272,355 @@ class DesktopDashboardApp:
 
         self.canvas.create_text(x1 + ui_scale.s(12), y2 - ui_scale.s(12), text="5 CRYPTO ASSETS (SPOT)", font=ui_scale.f_meta, fill=C_TEXT_MUTED if is_enabled else C_TEXT_DIM, anchor="w")
 
-    def _draw_stocks_volatile_card(
+    def _draw_stock_card(
         self,
-        page: Optional[PageData],
+        quote: StockQuote,
         x1: int,
         y1: int,
         x2: int,
         y2: int,
-        is_active: bool,
-        is_hover: bool,
-        is_enabled: bool,
+        is_active: bool = False,
+        is_hover: bool = False,
+        is_enabled: bool = True,
+        mode: str = "market_cap",
     ):
         border_color = C_ACTIVE_CYAN if is_active else (C_CARD_HOVER if is_hover else C_CARD_BORDER)
         bg_color = "#121A2B" if is_active else C_CARD_BG
-        self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg_color, outline=border_color, width=2 if is_active else 1)
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg_color, outline=border_color, width=2 if (is_active or is_hover) else 1)
 
-        self.canvas.create_text(x1 + ui_scale.s(14), y1 + ui_scale.s(16), text="TOP 10 MOST VOLATILE US STOCKS TODAY", font=ui_scale.f_card_title, fill=C_ACTIVE_CYAN, anchor="w")
+        # 1. Header: Symbol (top left) and Day Change % (top right)
+        sym_col = C_ACTIVE_CYAN if is_enabled else C_TEXT_DIM
+        self.canvas.create_text(x1 + ui_scale.s(14), y1 + ui_scale.s(16), text=quote.symbol, font=ui_scale.f_card_title, fill=sym_col, anchor="w")
 
-        mkt_badge = page.badge if page else "REGULAR"
-        b_c = C_GREEN if "OPEN" in mkt_badge or "REG" in mkt_badge else C_AMBER
-        tag_w = ui_scale.s(76)
-        self.canvas.create_rectangle(x2 - tag_w - ui_scale.s(10), y1 + ui_scale.s(8), x2 - ui_scale.s(10), y1 + ui_scale.s(24), fill="#131926", outline="#202A3C")
-        self.canvas.create_text(x2 - tag_w // 2 - ui_scale.s(10), y1 + ui_scale.s(16), text=mkt_badge, font=ui_scale.f_badge, fill=b_c, anchor="center")
+        chg_pct = quote.change_pct
+        chg_col = (C_GREEN if chg_pct >= 0 else C_RED) if is_enabled else C_TEXT_DIM
+        chg_str = f"{chg_pct:+.2f}%" if abs(chg_pct) < 10 else f"{chg_pct:+.1f}%"
+        self.canvas.create_text(x2 - ui_scale.s(14), y1 + ui_scale.s(16), text=chg_str, font=ui_scale.f_secondary_metric, fill=chg_col, anchor="e")
 
-        quotes = page.stocks_data if page else []
+        # 2. Company Name (subtle under symbol)
+        comp_name = quote.name or quote.symbol
+        if len(comp_name) > 22:
+            comp_name = comp_name[:20] + "…"
+        self.canvas.create_text(x1 + ui_scale.s(14), y1 + ui_scale.s(32), text=comp_name, font=ui_scale.f_meta, fill=C_TEXT_MUTED if is_enabled else C_TEXT_DIM, anchor="w")
+
+        # 3. Price & Market State
+        price_str = f"${quote.price:,.2f}"
+        self.canvas.create_text(x1 + ui_scale.s(14), y1 + ui_scale.s(52), text=price_str, font=ui_scale.f_primary_metric, fill=C_TEXT_WHITE if is_enabled else C_TEXT_DIM, anchor="w")
+
+        m_state = (quote.market_state or "REG").upper()
+        if "REG" in m_state or "OPEN" in m_state:
+            s_badge_col = C_GREEN
+            s_badge_text = "REG"
+        elif "POST" in m_state or "AFTER" in m_state:
+            s_badge_col = C_AMBER
+            s_badge_text = "POST"
+        elif "PRE" in m_state:
+            s_badge_col = C_AMBER
+            s_badge_text = "PRE"
+        else:
+            s_badge_col = C_TEXT_MUTED
+            s_badge_text = "CLOSED"
+        self.canvas.create_text(x2 - ui_scale.s(14), y1 + ui_scale.s(52), text=s_badge_text, font=ui_scale.f_badge, fill=s_badge_col if is_enabled else C_TEXT_DIM, anchor="e")
+
+        # 4. Intraday / 1D Sparkline
+        spark_data = quote.sparkline or []
+        if not spark_data:
+            from market_provider import synthesize_sparkline
+            spark_data = synthesize_sparkline(quote.price, quote.change_pct)
+
+        if spark_data and len(spark_data) >= 2:
+            sp_x1 = x1 + ui_scale.s(14)
+            sp_y1 = y1 + ui_scale.s(68)
+            sp_x2 = x2 - ui_scale.s(14)
+            sp_y2 = y2 - ui_scale.s(26)
+
+            mn = min(spark_data)
+            mx = max(spark_data)
+            span = (mx - mn) if mx != mn else 1.0
+
+            pts = []
+            n_pts = len(spark_data)
+            for i, val in enumerate(spark_data):
+                px = sp_x1 + i * ((sp_x2 - sp_x1) / (n_pts - 1))
+                py = sp_y2 - ((val - mn) / span) * (sp_y2 - sp_y1)
+                pts.append((px, py))
+
+            line_col = (C_GREEN if chg_pct >= 0 else C_RED) if is_enabled else "#253042"
+            for i in range(len(pts) - 1):
+                self.canvas.create_line(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1], fill=line_col, width=2)
+            self.canvas.create_oval(pts[-1][0] - 2, pts[-1][1] - 2, pts[-1][0] + 2, pts[-1][1] + 2, fill=line_col, outline="")
+
+        # 5. Footer: Market Cap / Volatility (left) and Source / Time (right)
+        if mode == "volatile":
+            left_footer = f"VOL {quote.volatility_pct:.1f}%"
+            left_col = C_ACTIVE_CYAN if is_enabled else C_TEXT_DIM
+        else:
+            left_footer = f"MARKET CAP  {quote.formatted_market_cap}"
+            left_col = C_AMBER if is_enabled else C_TEXT_DIM
+
+        self.canvas.create_text(x1 + ui_scale.s(14), y2 - ui_scale.s(12), text=left_footer, font=ui_scale.f_meta, fill=left_col, anchor="w")
+
+        right_footer = f"{quote.source} · {quote.fetched_at[:5] if quote.fetched_at else '1D'}"
+        self.canvas.create_text(x2 - ui_scale.s(14), y2 - ui_scale.s(12), text=right_footer, font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="e")
+
+    def _draw_stocks_section(self, curr_y: int, cur_w: int) -> int:
+        margin = ui_scale.grid_margin
+        gap = ui_scale.gap
+        avail_w = cur_w - 2 * margin
+        mode = getattr(self.config, "stock_mode", "market_cap")
+
+        # Generous breathing room
+        curr_y += ui_scale.s(14)
+
+        # Section Header Text
+        title_text = "─── [ US EQUITIES ] "
+        self.canvas.create_text(
+            margin,
+            curr_y + ui_scale.s(10),
+            text=title_text,
+            font=ui_scale.f_section_title,
+            fill=C_ACTIVE_CYAN,
+            anchor="w",
+        )
+
+        # Mode Toggles: [ MARKET CAP ] [ VOLATILE ]
+        btn_w = ui_scale.s(105)
+        btn_h = ui_scale.s(22)
+        tx1 = margin + ui_scale.s(145)
+        ty1 = curr_y
+
+        mcap_active = (mode == "market_cap")
+        self.canvas.create_rectangle(
+            tx1, ty1, tx1 + btn_w, ty1 + btn_h,
+            fill="#0E3547" if mcap_active else "#101622",
+            outline=C_ACTIVE_CYAN if mcap_active else "#202E42",
+            width=1,
+        )
+        self.canvas.create_text(
+            tx1 + btn_w // 2, ty1 + btn_h // 2,
+            text="[ MARKET CAP ]",
+            font=ui_scale.f_btn,
+            fill=C_ACTIVE_CYAN if mcap_active else C_TEXT_MUTED,
+            anchor="center",
+        )
+        self.stock_mode_bounds["market_cap"] = (tx1, ty1, tx1 + btn_w, ty1 + btn_h)
+
+        tx2 = tx1 + btn_w + ui_scale.s(6)
+        vol_w = ui_scale.s(90)
+        vol_active = (mode == "volatile")
+        self.canvas.create_rectangle(
+            tx2, ty1, tx2 + vol_w, ty1 + btn_h,
+            fill="#0E3547" if vol_active else "#101622",
+            outline=C_ACTIVE_CYAN if vol_active else "#202E42",
+            width=1,
+        )
+        self.canvas.create_text(
+            tx2 + vol_w // 2, ty1 + btn_h // 2,
+            text="[ VOLATILE ]",
+            font=ui_scale.f_btn,
+            fill=C_ACTIVE_CYAN if vol_active else C_TEXT_MUTED,
+            anchor="center",
+        )
+        self.stock_mode_bounds["volatile"] = (tx2, ty1, tx2 + vol_w, ty1 + btn_h)
+
+        # Dedicated Focus button
+        fx1 = tx2 + vol_w + ui_scale.s(10)
+        fx2 = fx1 + ui_scale.s(78)
+        fy1 = curr_y
+        fy2 = curr_y + btn_h
+        self.canvas.create_rectangle(fx1, fy1, fx2, fy2, fill="#131B2A", outline="#25354F", width=1)
+        self.canvas.create_text(
+            (fx1 + fx2) // 2,
+            (fy1 + fy2) // 2,
+            text="[ 🔍 FOCUS ]",
+            font=ui_scale.f_btn,
+            fill=C_ACTIVE_CYAN,
+            anchor="center",
+        )
+        self.focus_btn_bounds[SECTION_STOCKS] = (fx1, fy1, fx2, fy2)
+
+        # Trailing divider line
+        self.canvas.create_line(
+            fx2 + ui_scale.s(10),
+            curr_y + ui_scale.s(10),
+            cur_w - margin,
+            curr_y + ui_scale.s(10),
+            fill="#161F2E",
+            width=1,
+        )
+        curr_y += ui_scale.s(28)
+
+        # Get Quotes
+        page_id = "stocks_volatile" if mode == "volatile" else "stocks_market_cap"
+        page_data = self.state.get_page(page_id)
+        quotes = page_data.stocks_data if page_data else []
         if not quotes:
-            self.canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2, text="COLLECTING MARKET VOLATILITY...", font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="center")
-            return
+            from market_provider import get_stocks
+            quotes = get_stocks(mode=mode)
 
-        mid_x = (x1 + x2) // 2
-        row_h = ui_scale.s(21)
+        # Responsive column calculation (5 cols at 1080p, reflow to 4/3/2/1)
+        if avail_w >= 1350:
+            num_cols = 5
+        elif avail_w >= 1050:
+            num_cols = 4
+        elif avail_w >= 750:
+            num_cols = 3
+        elif avail_w >= 500:
+            num_cols = 2
+        else:
+            num_cols = 1
 
-        for idx, q in enumerate(quotes[:5]):
-            ry = y1 + ui_scale.s(38) + idx * row_h
-            chg_c = C_GREEN if q.change_pct >= 0 else C_RED
-            self.canvas.create_text(x1 + ui_scale.s(14), ry, text=f"{idx+1}", font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="w")
-            self.canvas.create_text(x1 + ui_scale.s(34), ry, text=q.symbol, font=ui_scale.f_secondary_metric, fill=C_TEXT_WHITE, anchor="w")
-            self.canvas.create_text(x1 + ui_scale.s(95), ry, text=f"${q.price:,.2f}", font=ui_scale.f_body, fill=C_TEXT_MUTED, anchor="w")
-            self.canvas.create_text(x1 + ui_scale.s(180), ry, text=f"{q.change_pct:+.1f}%", font=ui_scale.f_secondary_metric, fill=chg_c, anchor="e")
-            self.canvas.create_text(mid_x - ui_scale.s(16), ry, text=f"VOL {q.volatility_pct:.1f}%", font=ui_scale.f_secondary_metric, fill=C_ACTIVE_CYAN, anchor="e")
+        card_w = (avail_w - (num_cols - 1) * gap) // num_cols
+        card_h = ui_scale.s(145)
 
-        self.canvas.create_line(mid_x, y1 + ui_scale.s(32), mid_x, y2 - ui_scale.s(20), fill="#1A2436", width=1)
+        for idx, q in enumerate(quotes[:10]):
+            col = idx % num_cols
+            row = idx // num_cols
+            cx1 = margin + col * (card_w + gap)
+            cy1 = curr_y + row * (card_h + gap)
+            cx2 = cx1 + card_w
+            cy2 = cy1 + card_h
 
-        for idx, q in enumerate(quotes[5:10]):
-            ry = y1 + ui_scale.s(38) + idx * row_h
-            chg_c = C_GREEN if q.change_pct >= 0 else C_RED
-            self.canvas.create_text(mid_x + ui_scale.s(16), ry, text=f"{idx+6}", font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="w")
-            self.canvas.create_text(mid_x + ui_scale.s(36), ry, text=q.symbol, font=ui_scale.f_secondary_metric, fill=C_TEXT_WHITE, anchor="w")
-            self.canvas.create_text(mid_x + ui_scale.s(97), ry, text=f"${q.price:,.2f}", font=ui_scale.f_body, fill=C_TEXT_MUTED, anchor="w")
-            self.canvas.create_text(mid_x + ui_scale.s(182), ry, text=f"{q.change_pct:+.1f}%", font=ui_scale.f_secondary_metric, fill=chg_c, anchor="e")
-            self.canvas.create_text(x2 - ui_scale.s(14), ry, text=f"VOL {q.volatility_pct:.1f}%", font=ui_scale.f_secondary_metric, fill=C_ACTIVE_CYAN, anchor="e")
+            c_key = f"stock_{q.symbol}"
+            self.card_bounds[c_key] = (cx1, cy1, cx2, cy2)
+            is_hover = (c_key == self.hovered_card)
+            self._draw_stock_card(q, cx1, cy1, cx2, cy2, is_hover=is_hover, is_active=False, is_enabled=True, mode=mode)
 
-        footer_str = "METRIC: Intraday Range % = (High - Low) / PrevClose · YahooFinance"
-        self.canvas.create_text(x1 + ui_scale.s(14), y2 - ui_scale.s(10), text=footer_str, font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="w")
+        total_rows = (min(len(quotes), 10) + num_cols - 1) // num_cols
+        return curr_y + total_rows * (card_h + gap) + ui_scale.s(6)
+
+    def _draw_signal_card(
+        self,
+        sig: PredictionMarketSignal,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        is_hover: bool = False,
+    ):
+        border_col = "#38EF7D" if is_hover else "#1C2B22"
+        bg_col = "#101915" if is_hover else C_CARD_BG
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg_col, outline=border_col, width=2 if is_hover else 1)
+
+        # 1. Question Title (Bold & Readable)
+        q_text = sig.question
+        if len(q_text) > 44:
+            q_text = q_text[:42] + "…"
+        self.canvas.create_text(x1 + ui_scale.s(14), y1 + ui_scale.s(18), text=q_text, font=ui_scale.f_card_title, fill=C_TEXT_WHITE, anchor="w")
+
+        # 2. Probability Percentage (Big Consolas)
+        prob_pct = int(round(sig.yes_probability * 100))
+        prob_str = f"{prob_pct}%"
+        self.canvas.create_text(x2 - ui_scale.s(14), y1 + ui_scale.s(22), text=prob_str, font=ui_scale.f_primary_metric, fill="#00E5FF", anchor="e")
+
+        # 3. Sub-header: Category badge (left) & 24H Delta Movement (right)
+        cat_badge = sig.category.upper()
+        self.canvas.create_text(x1 + ui_scale.s(14), y1 + ui_scale.s(36), text=cat_badge, font=ui_scale.f_badge, fill="#38EF7D", anchor="w")
+
+        delta = sig.change_24h_pts
+        d_col = C_GREEN if delta >= 0 else C_RED
+        d_sym = "▲" if delta >= 0 else "▼"
+        d_str = f"{d_sym} {abs(delta):.1f} pts / 24H"
+        self.canvas.create_text(x2 - ui_scale.s(14), y1 + ui_scale.s(42), text=d_str, font=ui_scale.f_secondary_metric, fill=d_col, anchor="e")
+
+        # Divider
+        self.canvas.create_line(x1 + ui_scale.s(14), y1 + ui_scale.s(52), x2 - ui_scale.s(14), y1 + ui_scale.s(52), fill="#1E2B25", width=1)
+
+        # 4. Volume, Liquidity & Attention Score
+        meta_str = f"VOL: {sig.formatted_volume}   LIQ: {sig.formatted_liquidity}   ATTN: {int(sig.attention_score)}"
+        self.canvas.create_text(x1 + ui_scale.s(14), y1 + ui_scale.s(64), text=meta_str, font=ui_scale.f_meta, fill=C_TEXT_MUTED, anchor="w")
+
+        # 5. Related Headlines
+        self.canvas.create_text(x1 + ui_scale.s(14), y1 + ui_scale.s(84), text="Related Context & Headlines:", font=ui_scale.f_meta, fill="#38EF7D", anchor="w")
+
+        headlines = sig.related_headlines or []
+        row_y = y1 + ui_scale.s(102)
+        for hl in headlines[:2]:
+            hl_title = hl.headline
+            if len(hl_title) > 46:
+                hl_title = hl_title[:44] + "…"
+            self.canvas.create_text(x1 + ui_scale.s(14), row_y, text=f"• {hl_title}", font=ui_scale.f_body, fill=C_TEXT_WHITE, anchor="w")
+            src_str = f"{hl.source} · {hl.time_ago}"
+            self.canvas.create_text(x2 - ui_scale.s(14), row_y, text=src_str, font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="e")
+            row_y += ui_scale.s(18)
+
+        # 6. Disclaimer Footer
+        disc_str = "MARKET-IMPLIED PROBABILITY · NOT NEWS FACT · polymarket.com"
+        self.canvas.create_text(x1 + ui_scale.s(14), y2 - ui_scale.s(12), text=disc_str, font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="w")
+
+    def _draw_signals_section(self, curr_y: int, cur_w: int) -> int:
+        margin = ui_scale.grid_margin
+        gap = ui_scale.gap
+        avail_w = cur_w - 2 * margin
+
+        # Breathing room
+        curr_y += ui_scale.s(14)
+
+        # Header Title
+        self.canvas.create_text(
+            margin,
+            curr_y + ui_scale.s(10),
+            text="─── [ MARKET SIGNALS & PREDICTIONS ] ",
+            font=ui_scale.f_section_title,
+            fill="#38EF7D",
+            anchor="w",
+        )
+
+        # Focus button
+        fx1 = margin + ui_scale.s(310)
+        fx2 = fx1 + ui_scale.s(78)
+        fy1 = curr_y
+        fy2 = curr_y + ui_scale.s(22)
+        self.canvas.create_rectangle(fx1, fy1, fx2, fy2, fill="#131B2A", outline="#25354F", width=1)
+        self.canvas.create_text(
+            (fx1 + fx2) // 2,
+            (fy1 + fy2) // 2,
+            text="[ 🔍 FOCUS ]",
+            font=ui_scale.f_btn,
+            fill="#38EF7D",
+            anchor="center",
+        )
+        self.focus_btn_bounds[SECTION_SIGNALS] = (fx1, fy1, fx2, fy2)
+
+        # Context on right
+        sub_text = "Polymarket Prediction Odds & Live Market News · Attention Weighted"
+        self.canvas.create_text(cur_w - margin, curr_y + ui_scale.s(10), text=sub_text, font=ui_scale.f_meta, fill=C_TEXT_DIM, anchor="e")
+
+        curr_y += ui_scale.s(28)
+
+        # Get Signals
+        page_data = self.state.get_page("signals")
+        signals = page_data.signals_data if page_data else []
+        if not signals:
+            from signals_provider import get_prediction_signals
+            signals = get_prediction_signals()
+
+        # Responsive columns (3 columns on wide 1080p, 2 on medium, 1 on small)
+        if avail_w >= 1350:
+            num_cols = 3
+        elif avail_w >= 850:
+            num_cols = 2
+        else:
+            num_cols = 1
+
+        card_w = (avail_w - (num_cols - 1) * gap) // num_cols
+        card_h = ui_scale.s(190)
+
+        for idx, sig in enumerate(signals[:5]):
+            col = idx % num_cols
+            row = idx // num_cols
+            cx1 = margin + col * (card_w + gap)
+            cy1 = curr_y + row * (card_h + gap)
+            cx2 = cx1 + card_w
+            cy2 = cy1 + card_h
+
+            c_key = f"signal_{sig.event_id}"
+            self.card_bounds[c_key] = (cx1, cy1, cx2, cy2)
+            is_hover = (c_key == self.hovered_card)
+            self._draw_signal_card(sig, cx1, cy1, cx2, cy2, is_hover=is_hover)
+
+        total_rows = (min(len(signals), 5) + num_cols - 1) // num_cols
+        return curr_y + total_rows * (card_h + gap) + ui_scale.s(6)
 
     def _draw_local_pc_card(self, page: PageData, x1: int, y1: int, x2: int, y2: int, is_enabled: bool = True):
         card_w = x2 - x1

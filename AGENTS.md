@@ -64,20 +64,23 @@
 
 | File | Purpose | Critical Rules |
 | :--- | :--- | :--- |
-| `dashboard_app.py` | Main Desktop Companion application | Pure Tkinter; High-DPI; responsive reflow; presets; Focus; Creator views |
+| `dashboard_app.py` | Main Desktop Companion application | Pure Tkinter; High-DPI; responsive reflow; 6 presets; Focus; Creator views |
 | `ui_scale.py` | Centralized UI scale & High-DPI tokens | Per-Monitor-V2 awareness; font scaling; never used for MiniToo 160x128 |
-| `ui_components.py` | Redesigned 5-tab SettingsDialog | Left navigation; UI scale dropdown; independent Desktop vs MiniToo toggles |
-| `engine.py` | Background scheduler & MiniToo controller | Decoupled collector updates; 0 redundant frames; telemetry report |
-| `market_provider.py` | Stock quote & volatility provider abstraction | Pluggable interface; YahooFinance (free) & Finnhub; cached |
-| `collectors.py` | Data collectors (GPU, DGX, Multi-Crypto, Stocks, Git) | Consolidated requests; 60s caches; never block the UI thread |
+| `ui_components.py` | SettingsDialog & FirstRunDialog | First-run onboarding wizard; compact device panel; independent toggles |
+| `engine.py` | Background scheduler & hardware state container | DashboardState; decoupled updates; alert queue; rolling telemetry |
+| `signals_provider.py` | Polymarket prediction markets & RSS news | Public read-only Gamma API; no auth/wallets; deterministic attention score |
+| `market_provider.py` | Stock quotes, Top 10 US Market Cap, Volatility | Deduplicates share classes (GOOGL, BRK); sparklines; cached |
+| `collectors.py` | Data collectors (GPU, DGX, Crypto, Stocks, Signals) | Consolidated requests; 60s caches; never block the UI thread |
 | `claude_usage.py` | Claude account diagnostics & profile reader | Safe masking (`no***@gmail.com`); env precedence; no token scraping |
 | `providers.py` | AI Quota providers (Codex, Gemini, Claude) | Preserves authority levels; strictly calculates % LEFT |
-| `models.py` | Unified data structures (`PageData`, `CryptoAsset`, `StockQuote`) | Clean dataclasses; formatting helpers for micro-tokens |
-| `renderer.py` | Pixel-perfect 160×128 image generator | Pillow graphics; 8×10 tile alignment; multi-asset tables |
-| `detector.py` | Bluetooth SPP hardware discovery | Scores COM ports; safely probes `0xBD 0x13`; never hardcodes |
+| `models.py` | Unified data structures (`PageData`, `StockQuote`, `Alert`) | Clean dataclasses; formatted helpers; Alert model architecture |
+| `renderer.py` | Pixel-perfect 160×128 image generator | Pillow graphics; MiniToo layout for market cap and signals |
+| `src/renderers/ditoo_16.py` | Ditoo 16×16 LED pixel matrix engine | Rotating crypto, stock, and signal probability animations |
+| `detector.py` | Hardware discovery & Bluetooth status | Honest pairing check; opens `ms-settings:bluetooth`; never claims silent pairing |
 | `inputs.py` | Physical rotary knob & button listener | ~2.8–4 Hz polling; stops queries if disconnected; debounces |
 | `backends.py` | MiniToo frame transmission transport | Multi-packet SPP streaming `0x8B`; rolling 60-second telemetry |
 | `config.py` | Persistent user configuration & section definitions | Stored in `%APPDATA%\AiDeskDashboard\config.json`; no secrets |
+
 | `subproc.py` | Silent subprocess execution helper | Always use `run_hidden()` / `check_output_hidden()` on Windows |
 
 ---

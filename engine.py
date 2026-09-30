@@ -25,13 +25,14 @@ try:
 except ImportError:
     serial = None
 
-from models import PageData, MetricItem
+from models import PageData, MetricItem, Alert
 from dashboard import collect_page, PAGE_KEYS
 from renderer import render_dashboard_page
 from backends import MiniTooDisplay, get_display_backend
 from inputs import MiniTooInputAdapter, InputEvent
 from config import DashboardConfig, ALL_PAGE_IDS
-from detector import detect_minitoo_port
+from detector import detect_minitoo_port, detect_minitoo_connection_state
+
 from src.devices.ditoo import DitooDevice, DEFAULT_DITOO_BLE_MAC
 from src.renderers.ditoo_16 import Crypto16Renderer, Stock16Renderer, format_abbreviated_price, format_delta_pct
 from collectors import MultiCryptoCollector
@@ -129,14 +130,23 @@ class DashboardState:
         self._minitoo_active_page: str = init_p
         self._minitoo_connected: bool = False
         self._minitoo_status_text: str = "MINITOO ○ CONNECTING..."
-        
+        self._minitoo_state: str = "CONNECTING"
+        self._minitoo_last_seen: float = 0.0
+        self._minitoo_rssi: str = "SPP Link (Direct)"
+
         # Ditoo 16x16 State
         self._ditoo_connected: bool = False
         self._ditoo_status_text: str = "DITOO ○ DISCONNECTED"
+        self._ditoo_state: str = "OFFLINE"
+        self._ditoo_last_seen: float = 0.0
+        self._ditoo_rssi: str = "BLE GATT (~-64 dBm)"
         self._ditoo_active_asset: str = "BTC"
         self._ditoo_active_frame_type: str = "LOGO"
         self._ditoo_active_frame: Optional[Image.Image] = None
         self._ditoo_last_market_update: float = 0.0
+
+        # Alert Queue Architecture (Milestone 15)
+        self._alerts: List[Alert] = []
 
         self._last_update_time: float = 0.0
         self._listeners: List[Callable[[str, Any], None]] = []
@@ -209,10 +219,42 @@ class DashboardState:
         with self._lock:
             return self._minitoo_status_text
 
-    def set_minitoo_status(self, connected: bool, status_text: str):
+    @property
+    def minitoo_state(self) -> str:
+        with self._lock:
+            return self._minitoo_state
+
+    @property
+    def minitoo_last_seen(self) -> float:
+        with self._lock:
+            return self._minitoo_last_seen
+
+    @property
+    def minitoo_rssi(self) -> str:
+        with self._lock:
+            return self._minitoo_rssi
+
+    def set_minitoo_status(self, connected: bool, status_text: str, state_badge: Optional[str] = None):
         with self._lock:
             self._minitoo_connected = connected
             self._minitoo_status_text = status_text
+            if state_badge:
+                self._minitoo_state = state_badge
+            elif connected:
+                self._minitoo_state = "CONNECTED"
+                self._minitoo_last_seen = time.time()
+            elif "RECONNECTING" in status_text.upper():
+                self._minitoo_state = "RECONNECTING"
+            elif "PAIRING" in status_text.upper():
+                self._minitoo_state = "PAIRING REQUIRED"
+            elif "NOT FOUND" in status_text.upper():
+                self._minitoo_state = "NOT FOUND"
+            elif "OFFLINE" in status_text.upper():
+                self._minitoo_state = "OFFLINE"
+            else:
+                self._minitoo_state = "CONNECTING"
+            if connected:
+                self._minitoo_last_seen = time.time()
         self._notify("minitoo_status_changed", (connected, status_text))
 
     @property
@@ -224,6 +266,21 @@ class DashboardState:
     def ditoo_status_text(self) -> str:
         with self._lock:
             return self._ditoo_status_text
+
+    @property
+    def ditoo_state(self) -> str:
+        with self._lock:
+            return self._ditoo_state
+
+    @property
+    def ditoo_last_seen(self) -> float:
+        with self._lock:
+            return self._ditoo_last_seen
+
+    @property
+    def ditoo_rssi(self) -> str:
+        with self._lock:
+            return self._ditoo_rssi
 
     @property
     def ditoo_active_asset(self) -> str:
@@ -245,10 +302,25 @@ class DashboardState:
         with self._lock:
             return self._ditoo_last_market_update
 
-    def set_ditoo_status(self, connected: bool, status_text: str):
+    def set_ditoo_status(self, connected: bool, status_text: str, state_badge: Optional[str] = None):
         with self._lock:
             self._ditoo_connected = connected
             self._ditoo_status_text = status_text
+            if state_badge:
+                self._ditoo_state = state_badge
+            elif connected:
+                self._ditoo_state = "CONNECTED"
+                self._ditoo_last_seen = time.time()
+            elif "RECONNECTING" in status_text.upper():
+                self._ditoo_state = "RECONNECTING"
+            elif "NOT FOUND" in status_text.upper():
+                self._ditoo_state = "NOT FOUND"
+            elif "OFFLINE" in status_text.upper():
+                self._ditoo_state = "OFFLINE"
+            else:
+                self._ditoo_state = "CONNECTING"
+            if connected:
+                self._ditoo_last_seen = time.time()
         self._notify("ditoo_status_changed", (connected, status_text))
 
     def set_ditoo_frame(self, asset: str, frame_type: str, img: Image.Image, market_update_time: Optional[float] = None):
@@ -259,6 +331,23 @@ class DashboardState:
             if market_update_time:
                 self._ditoo_last_market_update = market_update_time
         self._notify("ditoo_frame_updated", (asset, frame_type, img))
+
+    def add_alert(self, alert: Alert):
+        with self._lock:
+            self._alerts.append(alert)
+            if len(self._alerts) > 20:
+                self._alerts.pop(0)
+        self._notify("alert_added", alert)
+
+    def get_alerts(self) -> List[Alert]:
+        with self._lock:
+            return list(self._alerts)
+
+    def get_recent_alerts(self, limit: int = 5) -> List[Alert]:
+        with self._lock:
+            return list(self._alerts[-limit:])
+
+
 
 
 # ==============================================================================
@@ -504,20 +593,34 @@ class MiniTooController:
         backoff_idx = 0
 
         while self._running:
+            # Check if desktop-only mode is selected
+            if getattr(self.config, "target_device", "auto") == "desktop":
+                self.state.set_minitoo_status(False, "MINITOO ○ OFFLINE (DESKTOP MODE)", "OFFLINE")
+                t_end = time.time() + 1.5
+                while self._running and time.time() < t_end:
+                    time.sleep(0.1)
+                continue
+
             # 1. Port Detection & Resolution
-            target_port = detect_minitoo_port(self.config.minitoo_port)
-            if not target_port:
-                self.state.set_minitoo_status(False, "MINITOO ○ NOT FOUND")
+            conn_state, detected_port = detect_minitoo_connection_state(self.config.minitoo_port)
+            if conn_state == "PAIRING REQUIRED":
+                self.state.set_minitoo_status(False, "MINITOO ○ PAIRING REQUIRED (Bluetooth Settings)", "PAIRING REQUIRED")
+                t_end = time.time() + 3.0
+                while self._running and time.time() < t_end:
+                    time.sleep(0.1)
+                continue
+            elif conn_state == "NOT FOUND" or not detected_port:
+                self.state.set_minitoo_status(False, "MINITOO ○ NOT FOUND", "NOT FOUND")
                 t_end = time.time() + 2.5
                 while self._running and time.time() < t_end:
                     time.sleep(0.1)
                 continue
 
-            self.port = target_port
-            self.display.port = target_port
+            self.port = detected_port
+            self.display.port = detected_port
 
             # 2. Connection Phase
-            self.state.set_minitoo_status(False, f"MINITOO ○ CONNECTING ({self.port})...")
+            self.state.set_minitoo_status(False, f"MINITOO ○ CONNECTING ({self.port})...", "CONNECTING")
             try:
                 self._adapter = MiniTooInputAdapter(
                     port=self.port,
@@ -533,7 +636,7 @@ class MiniTooController:
 
             if not self._adapter or not self._adapter.ser or not self._adapter.ser.is_open:
                 delay = self.BACKOFF_STEPS[min(backoff_idx, len(self.BACKOFF_STEPS) - 1)]
-                self.state.set_minitoo_status(False, f"MINITOO ○ RECONNECTING ({int(delay)}s)")
+                self.state.set_minitoo_status(False, f"MINITOO ○ RECONNECTING ({int(delay)}s)", "RECONNECTING")
                 backoff_idx += 1
                 t_end = time.time() + delay
                 while self._running and time.time() < t_end:
@@ -543,9 +646,12 @@ class MiniTooController:
             # Connection Succeeded!
             backoff_idx = 0
             self.reconnect_count += 1
-            self.state.set_minitoo_status(True, f"MINITOO ● CONNECTED ({self.port})")
+            self.state.set_minitoo_status(True, f"MINITOO ● CONNECTED ({self.port})", "CONNECTED")
+            self.config.last_successful_device = "minitoo"
+            self.config.save()
             self._last_sent_bytes = None
             self._force_push = True
+
 
             # Ensure device is explicitly in Channel 5 (Custom/DIY)
             if self._adapter:
@@ -855,29 +961,39 @@ class DitooController:
         reconnect_delay = 3.0
 
         while self._running:
+            # Check if desktop-only mode is selected
+            if getattr(self.config, "target_device", "auto") == "desktop":
+                self.state.set_ditoo_status(False, "DITOO ○ OFFLINE (DESKTOP MODE)", "OFFLINE")
+                await self._advance_preview_frame()
+                await asyncio.sleep(1.0)
+                continue
+
             # 1. Connection Phase
             if not self.device.is_connected:
-                self.state.set_ditoo_status(False, "DITOO ○ RECONNECTING...")
+                self.state.set_ditoo_status(False, "DITOO ○ CONNECTING...", "CONNECTING")
                 try:
-                    ok = await self.device.connect_ble(timeout=6.0)
+                    ok = await self.device.connect_ble(timeout=5.0)
                     if ok:
-                        self.state.set_ditoo_status(True, f"DITOO ● CONNECTED ({self.device.ble_address})")
+                        self.state.set_ditoo_status(True, f"DITOO ● CONNECTED ({self.device.ble_address})", "CONNECTED")
+                        self.config.last_successful_device = "ditoo"
+                        self.config.save()
                         # Sync brightness
                         await self.device.set_brightness(self.config.ditoo_brightness)
                         self._last_brightness = self.config.ditoo_brightness
                         self._force_push = True
                     else:
-                        self.state.set_ditoo_status(False, "DITOO ○ RECONNECTING (3s)")
+                        self.state.set_ditoo_status(False, "DITOO ○ RECONNECTING (3s)", "RECONNECTING")
                         # Even if BLE is disconnected, generate preview frames
                         await self._advance_preview_frame()
                         await asyncio.sleep(reconnect_delay)
                         continue
                 except Exception as ce:
                     print(f"[DITOO] Connection attempt error: {ce}")
-                    self.state.set_ditoo_status(False, "DITOO ○ RECONNECTING (3s)")
+                    self.state.set_ditoo_status(False, "DITOO ○ RECONNECTING (3s)", "RECONNECTING")
                     await self._advance_preview_frame()
                     await asyncio.sleep(reconnect_delay)
                     continue
+
 
             # 2. Operational Connected Loop
             try:

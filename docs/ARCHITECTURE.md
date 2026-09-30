@@ -21,7 +21,9 @@ The system follows a strict unidirectional data flow:
 │  - ClaudeUsageProvider (local profile ~/.claude.json)  │
 │  - DgxSparkCollector (remote SSH / Tailscale)          │
 │  - MultiCryptoCollector (BTC, ETH, SOL, DOGE, PEPE)    │
-│  - StockVolatilityCollector (Top 10 Volatile US Stocks)│
+│  - StockMarketCapCollector (Top 10 US Equities by Cap) │
+│  - StockVolatilityCollector (Top 10 Volatile Scanner)  │
+│  - SignalsCollector (Polymarket Implied Odds & News)   │
 │  - AiActivityCollector (agent sessions / diffs)        │
 │  - ServicesCollector (TCP socket port probes)          │
 │  - CodingStatusCollector (git repo status)             │
@@ -31,24 +33,25 @@ The system follows a strict unidirectional data flow:
 ┌────────────────────────────────────────────────────────┐
 │           NORMALIZED STATE CONTAINER (engine.py)       │
 │  - DashboardState (thread-safe dict of PageData)       │
+│  - Alert Engine Queue (normalized Alert model)         │
 │  - DataEngine (background scheduling thread)           │
 │  - Event dispatcher (listeners notify on change)       │
 └──────────────┬───────────────────────────┬─────────────┘
                │                           │
                ▼                           ▼
 ┌───────────────────────────┐ ┌───────────────────────────┐
-│     DESKTOP RENDERER      │ │     MINITOO RENDERER      │
-│  (dashboard_app.py)       │ │  (renderer.py)            │
-│  - Section-based Canvas   │ │  - Pillow 160x128 RGB     │
-│  - Presets (ALL, AI, etc.)│ │  - 8x10 tile alignment    │
-│  - Dynamic section groups │ │  - Multi-asset tables     │
-│  - Interactive card clicks│ │  - Coin sparkline pages   │
+│     DESKTOP RENDERER      │ │   HARDWARE CONTROLLERS    │
+│  (dashboard_app.py)       │ │  (renderer.py / ditoo_16) │
+│  - Section-based Canvas   │ │  - MiniToo 160x128 SPP    │
+│  - 6 Presets (ALL, AI...) │ │  - Ditoo 16x16 BLE GATT   │
+│  - 5x2 Market Cap Grid    │ │  - Decoupled frame hashes │
+│  - Interactive card clicks│ │  - Coin & Signal rotation │
 └──────────────┬────────────┘ └─────────────┬─────────────┘
                │                            │
                ▼                            ▼
 ┌───────────────────────────┐ ┌───────────────────────────┐
-│     DESKTOP DISPLAY       │ │      MINITOO DISPLAY      │
-│     Windows GUI Window    │ │     Bluetooth SPP (0x8B)  │
+│     DESKTOP DISPLAY       │ │     PHYSICAL HARDWARE     │
+│     Windows GUI Window    │ │     MiniToo / Ditoo / Dual│
 └───────────────────────────┘ └───────────────────────────┘
 ```
 
@@ -56,38 +59,24 @@ The system follows a strict unidirectional data flow:
 
 ## 2. Section-Based Architecture & Presets
 
-Starting in Milestone 12, AI Desk Dashboard transitioned from a fixed 3×3 grid to a fully configurable, section-based layout:
+AI Desk Dashboard uses a fully configurable, section-based layout:
 
 ### Default Sections
 - **`CRYPTO`**: Cards for `BTC`, `ETH`, `SOL`, `DOGE`, `PEPE`.
 - **`AI USAGE`**: Cards for `CODEX`, `GEMINI`, `CLAUDE` (active profile).
+- **`STOCKS`**: Top 10 US Equities by Market Cap with 5×2 card grid and secondary volatility scanner.
+- **`SIGNALS`**: Prediction market implied probabilities (Polymarket) and related RSS news.
 - **`SYSTEM`**: Cards for `LOCAL PC`, `DGX SPARK`, `SERVICES`, `CODING WORKSPACE`, `AI ACTIVITY`.
-- **`STOCKS`**: Card for `TOP 10 VOLATILE US STOCKS` scanner.
-
-### Configuration Model (`config.py`)
-Each section is defined by a `DashboardSectionConfig`:
-```python
-@dataclass
-class DashboardSectionConfig:
-    id: str
-    title: str
-    enabled: bool = True
-    cards: list[str] = field(default_factory=list)
-```
-
-The user configuration stores:
-- `section_order`: List of section IDs defining top-to-bottom rendering order.
-- `sections`: Map of section ID to `DashboardSectionConfig` (card order, enabled states).
-- `enabled_cards`: Set of card keys enabled for the Desktop application.
-- `enabled_cards_minitoo`: Set of card keys enabled for physical MiniToo page rotation.
 
 ### Presets & Focus Mode
 Presets allow instant focus switching without altering saved layouts:
-- **`[ ALL ]`**: Enables all 4 sections (`CRYPTO`, `AI USAGE`, `SYSTEM`, `STOCKS`).
-- **`[ AI ]`**: Enables `AI USAGE` and AI Activity.
-- **`[ CRYPTO ]`**: Focuses exclusively on cryptocurrency assets (`BTC`, `ETH`, `SOL`, `DOGE`, `PEPE`) with expanded sparklines.
-- **`[ STOCKS ]`**: Focuses on US equity market volatility rankings.
-- **`[ SYSTEM ]`**: Focuses on hardware cluster metrics (Local RTX GPU, remote DGX Spark, Services health, Coding workspace).
+- **`1` `[ ALL ]`**: Enables all core sections (`CRYPTO`, `AI USAGE`, `STOCKS`, `SIGNALS`, `SYSTEM`).
+- **`2` `[ AI ]`**: Enables `AI USAGE` and AI Activity.
+- **`3` `[ CRYPTO ]`**: Focuses exclusively on cryptocurrency assets (`BTC`, `ETH`, `SOL`, `DOGE`, `PEPE`) with expanded sparklines.
+- **`4` `[ STOCKS ]`**: Focuses on US equity market capitalization cards with `[ MARKET CAP ]` and `[ VOLATILE ]` toggle.
+- **`5` `[ SIGNALS ]`**: Focuses on high-signal prediction market probabilities and contextual news headlines.
+- **`6` `[ SYSTEM ]`**: Focuses on workstation cluster metrics (Local RTX GPU, remote DGX Spark, Services health, Coding workspace).
+
 
 #### Focus Mode (Creator / Shorts View)
 Clicking `[ 🔍 FOCUS ]` on any section header instantly switches the dashboard into an isolated, enlarged hero layout with high-resolution sparklines and prominent metrics. A prominent top banner provides an immediate `[ ◀ BACK / ALL ]` escape action.
